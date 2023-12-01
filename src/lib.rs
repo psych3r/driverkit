@@ -1,7 +1,6 @@
 use std::ffi::CString;
-
+pub use interface::KeyEvent;
 mod interface {
-
 use std::os::raw::c_char;
 use std::fmt;
 

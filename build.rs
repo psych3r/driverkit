@@ -8,7 +8,7 @@ fn main() {
         .flag("-w")
         .shared_flag(true)
         .flag("-fPIC")
-        .out_dir("include")
+        //.out_dir("include")
         .compile("dext");
 
     println!("cargo:rustc-link-lib=framework=IOKit");
