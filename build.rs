@@ -8,12 +8,10 @@ fn main() {
         .flag("-w")
         .shared_flag(true)
         .flag("-fPIC")
-        //.out_dir("include")
         .compile("dext");
-
 
     println!("cargo:rustc-link-lib=framework=IOKit");
     println!("cargo:rustc-link-lib=framework=CoreFoundation");
 
-    //cc c_src/list-keyboards.c -o man -framework IOKit -framework CoreFoundation
+    //cc c_src/list-keyboards.c -o list-keyboards -framework IOKit -framework CoreFoundation
 }
