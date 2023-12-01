@@ -38,14 +38,22 @@ pub fn release_kb() -> i32 {
 }
 
 pub fn grab_kb(product: &str) -> i32 {
-    let c_str_ptr = CString::new(product)
-        .expect("CString::new failed")
-        .into_raw();
+
+    let c_str_ptr = if product.is_empty() {
+        std::ptr::null_mut()
+    } else {
+        CString::new(product)
+            .expect("CString::new failed")
+            .into_raw()
+    };
+
     let ret = unsafe { interface::grab_kb(c_str_ptr) };
 
     // Convert the raw pointer back to CString to free the memory
-    unsafe {
-        let _ = CString::from_raw(c_str_ptr);
+    if !product.is_empty() {
+        unsafe {
+            let _ = CString::from_raw(c_str_ptr);
+        }
     }
     ret
 }
