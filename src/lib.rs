@@ -10,6 +10,7 @@ mod interface {
         pub fn grab_kb(product: *mut c_char) -> i32;
         pub fn send_key(e: *mut KeyEvent) -> i32;
         pub fn wait_key(e: *mut KeyEvent) -> i32;
+        pub fn list_keyboards() -> i32;
     }
 
     #[repr(C)]
@@ -64,4 +65,8 @@ pub fn send_key(e: *mut interface::KeyEvent) -> i32 {
 
 pub fn wait_key(e: *mut interface::KeyEvent) -> i32 {
     unsafe { interface::wait_key(e) }
+}
+
+pub fn list_keyboards() -> i32 {
+    unsafe { interface::list_keyboards() }
 }

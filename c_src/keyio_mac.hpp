@@ -104,6 +104,7 @@ void open_matching_devices(char* product, io_iterator_t iter)
         if(product)
             match = match && (CFStringCompare(cfcurr, cfproduct, 0) == kCFCompareEqualTo);
         CFRelease(cfcurr);
+        //if(!match && product) continue;
         if(!match) continue;
         IOHIDDeviceRef dev = IOHIDDeviceCreate(kCFAllocatorDefault, curr);
         source_device[curr] = dev;
@@ -281,4 +282,51 @@ extern "C" int release_kb()
     // Sink
     if(exit_sink()) retval = 1;
     return retval;
+}
+
+std::string CFStringToStdString(CFStringRef cfString)
+{
+    if (cfString == nullptr)  return std::string();
+    CFIndex length = CFStringGetLength(cfString);
+    CFIndex maxSize = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
+    std::string utf8String(maxSize, '\0');
+    if (CFStringGetCString(cfString, &utf8String[0], maxSize, kCFStringEncodingUTF8))
+    {
+        utf8String.resize(strlen( utf8String.c_str()));
+        return utf8String;
+    }
+    return std::string();
+}
+
+extern "C" int list_keyboards()
+{
+    std::vector<std::string> keeb_list;
+    keeb_list.push_back("");
+    CFMutableDictionaryRef matching_dictionary = IOServiceMatching(kIOHIDDeviceKey);
+    if(!matching_dictionary)
+    {
+        fprintf(stderr, "IOServiceMatching failed");
+        return 1;
+    }
+    UInt32 value = kHIDPage_GenericDesktop;
+    CFNumberRef cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
+    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsagePageKey), cfValue);
+    CFRelease(cfValue);
+    value = kHIDUsage_GD_Keyboard;
+    cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
+    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsageKey), cfValue);
+    CFRelease(cfValue);
+    io_iterator_t iter = IO_OBJECT_NULL;
+    kern_return_t r = IOServiceGetMatchingServices(kIOMainPortDefault,
+                      matching_dictionary,
+                      &iter);
+    if(r != KERN_SUCCESS)
+    {
+        fprintf(stderr, "IOServiceGetMatchingServices failed");
+        return r;
+    }
+    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
+        std::cout << CFStringToStdString((CFStringRef)IORegistryEntryCreateCFProperty(curr, CFSTR("Product"), kCFAllocatorDefault,
+                             kIOHIDOptionsTypeNone)) << std::endl;
+    return 0;
 }
