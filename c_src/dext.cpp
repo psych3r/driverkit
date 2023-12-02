@@ -14,6 +14,18 @@ static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_
 static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_keyboard_input apple_keyboard;
 static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::consumer_input consumer;
 
+bool driver_activated(void)
+{
+    std::string service_name("org_pqrs_Karabiner_DriverKit_VirtualHIDDeviceRoot");
+    auto service = IOServiceGetMatchingService(type_safe::get(pqrs::osx::iokit_mach_port::null),
+                   IOServiceNameMatching(service_name.c_str()));
+    if (!service)
+        return false;
+
+    IOObjectRelease(service);
+    return true;
+}
+
 int init_sink()
 {
     pqrs::dispatcher::extra::initialize_shared_dispatcher();
@@ -31,20 +43,26 @@ int init_sink()
         std::cout << "connect_failed " << error_code << std::endl;
     });
 
-    client->closed.connect([]
-    {
-        std::cout << "closed" << std::endl;
-    });
+    client->closed.connect([] { std::cout << "closed" << std::endl; });
 
     client->error_occurred.connect([](auto&& error_code)
     {
         std::cout << "error_occurred " << error_code << std::endl;
     });
 
+    client->driver_activated.connect([](auto&& driver_activated)
+    {
+        static std::optional<bool> previous_value;
+        if (previous_value != driver_activated)
+        {
+            std::cout << "driver_activated " << driver_activated << std::endl;
+            previous_value = driver_activated;
+        }
+    });
+
     client->driver_connected.connect([](auto&& driver_connected)
     {
         static std::optional<bool> previous_value;
-
         if (previous_value != driver_connected)
         {
             std::cout << "driver_connected " << driver_connected << std::endl;
@@ -61,8 +79,7 @@ int init_sink()
             previous_value = driver_version_mismatched;
         }
     });
-    
-    /**/
+
     client->async_start();
     return 0;
 }

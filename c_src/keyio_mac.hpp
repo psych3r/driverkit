@@ -15,6 +15,7 @@
 
 int init_sink(void);
 int exit_sink(void);
+bool driver_activated(void);
 
 /*
  * Key event information that's shared between C++ and Haskell.
@@ -235,6 +236,7 @@ void monitor_kb(char* product)
  */
 extern "C" int grab_kb(char* product)
 {
+    if (!driver_activated()) return 13;
     // Source
     if (pipe(fd) == -1)
     {
@@ -257,6 +259,7 @@ extern "C" int grab_kb(char* product)
  */
 extern "C" int release_kb()
 {
+    if (!driver_activated()) return 0;
     int retval = 0;
     kern_return_t kr;
     // Source
