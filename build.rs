@@ -1,6 +1,6 @@
 fn main() {
     cc::Build::new()
-        .file("c_src/dext.cpp")
+        .file("c_src/driverkit.cpp")
         .include("c_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit")
         .include("c_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include")
         .cpp(true)
@@ -8,7 +8,7 @@ fn main() {
         .flag("-w")
         .shared_flag(true)
         .flag("-fPIC")
-        .compile("dext");
+        .compile("driverkit");
 
     println!("cargo:rustc-link-lib=framework=IOKit");
     println!("cargo:rustc-link-lib=framework=CoreFoundation");
