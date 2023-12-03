@@ -24,7 +24,7 @@ static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::consum
 
 static std::thread thread;
 static CFRunLoopRef listener_loop;
-static std::map<io_service_t, IOHIDDeviceRef> source_device;
+static std::map<io_service_t, IOHIDDeviceRef> source_devices;
 static int fd[2];
 static char* prod = nullptr;
 static CFMutableDictionaryRef matching_dictionary = NULL;
@@ -44,15 +44,15 @@ struct DKEvent
 
 int init_sink(void);
 int exit_sink(void);
+int start_loop(char* product);
 void print_iokit_error(const char* fname, int freturn = 0);
 void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef value);
 void matched_callback(void* context, io_iterator_t iter);
 void terminated_callback(void* context, io_iterator_t iter);
 void monitor_kb(char* product);
 
-void monitor_keeb(char* product);
 void close_registered_devices();
-void register_keeb(mach_port_t keeb);
+void open_device(mach_port_t keeb);
 void init_keyboards_dictionary();
 io_iterator_t get_keyboards_iterator();
 std::string CFStringToStdString(CFStringRef cfString);
@@ -68,8 +68,9 @@ extern "C" {
     int wait_key(struct DKEvent* e);
     int release_kb();
 
+    void register_device(char* product);
     void list_keyboards();
     bool device_matches(const char* product);
     bool driver_activated(void);
-    void register_matching_devices(char* product, io_iterator_t iter);
+    void open_matching_devices(char* product, io_iterator_t iter);
 }

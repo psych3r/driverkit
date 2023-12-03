@@ -104,7 +104,7 @@ void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef 
 void matched_callback(void* context, io_iterator_t iter)
 {
     char* product = (char*)context;
-    register_matching_devices(product, iter);
+    open_matching_devices(product, iter);
 }
 
 /*
@@ -114,47 +114,20 @@ void matched_callback(void* context, io_iterator_t iter)
 void terminated_callback(void* context, io_iterator_t iter)
 {
     for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
-        source_device.erase(curr);
+        source_devices.erase(curr);
 }
 
-/*
- * For each keyboard, registers an asynchronous callback to run when
- * new input from the user is available from that keyboard. Then
- * sleeps indefinitely, ready to received asynchronous callbacks.
- */
-void monitor_keeb(char* product)
-{
-    init_keyboards_dictionary();
-    io_iterator_t iter = get_keyboards_iterator();
-    listener_loop = CFRunLoopGetCurrent();
-    register_matching_devices(product, iter);
 
-    IONotificationPortRef notification_port = IONotificationPortCreate(kIOMainPortDefault);
-    CFRunLoopSourceRef notification_source  = IONotificationPortGetRunLoopSource(notification_port);
-    CFRunLoopAddSource(listener_loop, notification_source, kCFRunLoopDefaultMode);
-
-    CFRetain(matching_dictionary);
-    kern_return_t kr = IOServiceAddMatchingNotification(notification_port, kIOMatchedNotification,
-                       matching_dictionary, matched_callback, product, &iter);
-
-    if (kr != KERN_SUCCESS) { print_iokit_error("IOServiceAddMatchingNotification", kr); return; }
-
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {}
-
-    kr = IOServiceAddMatchingNotification(notification_port, kIOTerminatedNotification,
-                                          matching_dictionary, terminated_callback, NULL, &iter);
-
-    if (kr != KERN_SUCCESS) { print_iokit_error("IOServiceAddMatchingNotification", kr); return; }
-
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {}
-
+int start_loop(char* product) {
+    if (source_devices.empty()) return 1; // no registered devices!
     CFRunLoopRun();
     close_registered_devices();
+    return 0;
 }
 
 void close_registered_devices()
 {
-    for(std::pair<const io_service_t, IOHIDDeviceRef> p : source_device)
+    for(std::pair<const io_service_t, IOHIDDeviceRef> p : source_devices)
     {
         kern_return_t kr = IOHIDDeviceClose(p.second, kIOHIDOptionsTypeSeizeDevice);
         if(kr != KERN_SUCCESS)
@@ -162,14 +135,13 @@ void close_registered_devices()
             print_iokit_error("IOServiceAddMatchingNotification", kr);
             return;
         }
-
     }
 }
 
-void register_keeb(mach_port_t keeb)
+void open_device(mach_port_t keeb)
 {
     IOHIDDeviceRef dev = IOHIDDeviceCreate(kCFAllocatorDefault, keeb);
-    source_device[keeb] = dev;
+    source_devices[keeb] = dev;
     IOHIDDeviceRegisterInputValueCallback(dev, input_callback, NULL);
     kern_return_t kr = IOHIDDeviceOpen(dev, kIOHIDOptionsTypeSeizeDevice);
     if(kr != kIOReturnSuccess)
@@ -245,7 +217,7 @@ extern "C" {
     {
         std::string service_name("org_pqrs_Karabiner_DriverKit_VirtualHIDDeviceRoot");
         auto service = IOServiceGetMatchingService(type_safe::get(pqrs::osx::iokit_mach_port::null),
-                       IOServiceNameMatching(service_name.c_str()));
+                IOServiceNameMatching(service_name.c_str()));
         if (!service) return false;
 
         IOObjectRelease(service);
@@ -308,7 +280,7 @@ extern "C" {
             prod = (char*)malloc(strlen(product) + 1);
             strcpy(prod, product);
         }
-        thread = std::thread{monitor_keeb, prod};
+        thread = std::thread{start_loop, prod};
         // Sink
         return init_sink();
     }
@@ -347,13 +319,42 @@ extern "C" {
         return retval;
     }
 
+    void register_device(char* product)
+    {
+        init_keyboards_dictionary();
+        io_iterator_t iter = get_keyboards_iterator();
+        listener_loop = CFRunLoopGetCurrent();
+        open_matching_devices(product, iter);
+
+        IONotificationPortRef notification_port = IONotificationPortCreate(kIOMainPortDefault);
+        CFRunLoopSourceRef notification_source  = IONotificationPortGetRunLoopSource(notification_port);
+        CFRunLoopAddSource(listener_loop, notification_source, kCFRunLoopDefaultMode);
+
+        CFRetain(matching_dictionary);
+        kern_return_t kr = IOServiceAddMatchingNotification(notification_port, kIOMatchedNotification,
+                matching_dictionary, matched_callback, product, &iter);
+
+        if (kr != KERN_SUCCESS) { print_iokit_error("IOServiceAddMatchingNotification", kr); return; }
+
+        for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {}
+
+        kr = IOServiceAddMatchingNotification(notification_port, kIOTerminatedNotification,
+                matching_dictionary, terminated_callback, NULL, &iter);
+
+        if (kr != KERN_SUCCESS) { print_iokit_error("IOServiceAddMatchingNotification", kr); return; }
+
+        for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {}
+
+        IOObjectRelease(iter);
+    }
+
     /*
      * all this does is:
      * 1. register all devices if product is null or ""
      * 2. register only one device with exact name match
      * 3. never ever ever register karabiner
      * */
-    void register_matching_devices(char* product, io_iterator_t iter)
+    void open_matching_devices(char* product, io_iterator_t iter)
     {
         CFStringRef device    = product ? from_cstr(product) : NULL;
         CFStringRef karabiner = from_cstr("Karabiner VirtualHIDKeyboard");
@@ -371,7 +372,7 @@ extern "C" {
 
             // register all if no product specified or only specified product
             if( !product || (CFStringCompare(current_device, device, 0) == kCFCompareEqualTo))
-                register_keeb(curr);
+                open_device(curr);
             CFRelease(current_device);
         }
 
