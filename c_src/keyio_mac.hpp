@@ -151,7 +151,7 @@ extern "C" int wait_key(struct DKEvent* e)
     return read(fd[0], e, sizeof(struct DKEvent)) == sizeof(struct DKEvent);
 }
 
-int device_matches(char* product)
+extern "C" int device_matches(char* product)
 {
     if (!product) return 0; // not specified, connect all devices
 
