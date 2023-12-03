@@ -55,14 +55,14 @@ pub fn list_keyboards() -> i32 {
     unsafe { interface::list_keyboards() }
 }
 
-pub fn grab_kb(product: &str) -> Result<i32, GrabError> {
+pub fn grab_kb(product: &str) -> Result<(), GrabError> {
     if !driver_activated() {
         Err(GrabError::DriverInactive)
     } else if !device_matches(product) {
         Err(GrabError::DeviceMismatch)
     } else {
         match grab(product) {
-            0 => Ok(0),
+            0 => Ok(()),
             _ => Err(GrabError::GrabbingFailed),
         }
     }
