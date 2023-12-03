@@ -11,6 +11,8 @@ mod interface {
         pub fn send_key(e: *mut KeyEvent) -> i32;
         pub fn wait_key(e: *mut KeyEvent) -> i32;
         pub fn list_keyboards() -> i32;
+        pub fn driver_activated() -> bool;
+        pub fn device_matches(product: *mut c_char) -> i32;
     }
 
     #[repr(C)]
@@ -34,12 +36,39 @@ mod interface {
     }
 }
 
+pub enum GrabError {
+    DeviceMismatch,
+    DriverInactive,
+    GrabbingFailed,
+}
+
+pub fn send_key(e: *mut interface::KeyEvent) -> i32 {
+    unsafe { interface::send_key(e) }
+}
+pub fn wait_key(e: *mut interface::KeyEvent) -> i32 {
+    unsafe { interface::wait_key(e) }
+}
 pub fn release_kb() -> i32 {
     unsafe { interface::release_kb() }
 }
+pub fn list_keyboards() -> i32 {
+    unsafe { interface::list_keyboards() }
+}
 
-pub fn grab_kb(product: &str) -> i32 {
+pub fn grab_kb(product: &str) -> Result<i32, GrabError> {
+    if !driver_activated() {
+        Err(GrabError::DriverInactive)
+    } else if !device_matches(product) {
+        Err(GrabError::DeviceMismatch)
+    } else {
+        match grab(product) {
+            0 => Ok(0),
+            _ => Err(GrabError::GrabbingFailed),
+        }
+    }
+}
 
+fn grab(product: &str) -> i32 {
     let c_str_ptr = if product.is_empty() {
         std::ptr::null_mut()
     } else {
@@ -59,14 +88,21 @@ pub fn grab_kb(product: &str) -> i32 {
     ret
 }
 
-pub fn send_key(e: *mut interface::KeyEvent) -> i32 {
-    unsafe { interface::send_key(e) }
+fn driver_activated() -> bool {
+    unsafe { interface::driver_activated() }
 }
 
-pub fn wait_key(e: *mut interface::KeyEvent) -> i32 {
-    unsafe { interface::wait_key(e) }
-}
-
-pub fn list_keyboards() -> i32 {
-    unsafe { interface::list_keyboards() }
+fn device_matches(product: &str) -> bool {
+    if product.is_empty() {
+        true
+    } else {
+        let c_str_ptr = CString::new(product)
+            .expect("CString::new failed")
+            .into_raw();
+        let ret = unsafe { interface::device_matches(c_str_ptr) };
+        unsafe {
+            let _ = CString::from_raw(c_str_ptr);
+        }
+        ret == 0
+    }
 }
