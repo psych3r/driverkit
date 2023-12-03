@@ -24,7 +24,7 @@ extern "C" bool driver_activated(void);
  * page: represents IOKit usage page
  * code: represents IOKit usage
  */
-struct KeyEvent
+struct DKEvent
 {
     uint64_t value;
     uint32_t page;
@@ -61,12 +61,12 @@ void print_iokit_error(const char* fname, int freturn = 0)
  */
 void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef value)
 {
-    struct KeyEvent e;
+    struct DKEvent e;
     IOHIDElementRef element = IOHIDValueGetElement(value);
     e.value = IOHIDValueGetIntegerValue(value);
     e.page = IOHIDElementGetUsagePage(element);
     e.code = IOHIDElementGetUsage(element);
-    write(fd[1], &e, sizeof(struct KeyEvent));
+    write(fd[1], &e, sizeof(struct DKEvent));
 }
 
 void open_matching_devices(char* product, io_iterator_t iter)
@@ -146,9 +146,9 @@ void terminated_callback(void* context, io_iterator_t iter)
  * Reads a new key event from the pipe, blocking until a new event is
  * ready.
  */
-extern "C" int wait_key(struct KeyEvent* e)
+extern "C" int wait_key(struct DKEvent* e)
 {
-    return read(fd[0], e, sizeof(struct KeyEvent)) == sizeof(struct KeyEvent);
+    return read(fd[0], e, sizeof(struct DKEvent)) == sizeof(struct DKEvent);
 }
 
 int device_matches(char* product)

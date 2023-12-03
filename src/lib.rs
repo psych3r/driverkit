@@ -1,4 +1,4 @@
-pub use interface::KeyEvent;
+pub use interface::DKEvent;
 use std::ffi::CString;
 
 mod interface {
@@ -8,8 +8,8 @@ mod interface {
     extern "C" {
         pub fn release_kb() -> i32;
         pub fn grab_kb(product: *mut c_char) -> i32;
-        pub fn send_key(e: *mut KeyEvent) -> i32;
-        pub fn wait_key(e: *mut KeyEvent) -> i32;
+        pub fn send_key(e: *mut DKEvent) -> i32;
+        pub fn wait_key(e: *mut DKEvent) -> i32;
         pub fn list_keyboards() -> i32;
         pub fn driver_activated() -> bool;
         pub fn device_matches(product: *mut c_char) -> i32;
@@ -17,13 +17,13 @@ mod interface {
 
     #[repr(C)]
     #[derive(Debug)]
-    pub struct KeyEvent {
+    pub struct DKEvent {
         pub value: u64,
         pub page: u32,
         pub code: u32,
     }
 
-    impl fmt::Display for KeyEvent {
+    impl fmt::Display for DKEvent {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             let keycode = 0x0000FFFF & (self.page << 8 | self.code);
             write!(
@@ -42,10 +42,10 @@ pub enum GrabError {
     GrabbingFailed,
 }
 
-pub fn send_key(e: *mut interface::KeyEvent) -> i32 {
+pub fn send_key(e: *mut interface::DKEvent) -> i32 {
     unsafe { interface::send_key(e) }
 }
-pub fn wait_key(e: *mut interface::KeyEvent) -> i32 {
+pub fn wait_key(e: *mut interface::DKEvent) -> i32 {
     unsafe { interface::wait_key(e) }
 }
 pub fn release_kb() -> i32 {

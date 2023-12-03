@@ -95,7 +95,7 @@ int exit_sink()
  * This gets us some code reuse (see the send_key overload below)
  */
 template<typename T>
-int send_key(T& keyboard, struct KeyEvent* e)
+int send_key(T& keyboard, struct DKEvent* e)
 {
     if(e->value == 1) keyboard.keys.insert(e->code);
     else if(e->value == 0) keyboard.keys.erase(e->code);
@@ -109,7 +109,7 @@ int send_key(T& keyboard, struct KeyEvent* e)
  * posts the information to the karabiner kernel extension (which
  * represents a virtual keyboard).
  */
-extern "C" int send_key(struct KeyEvent* e)
+extern "C" int send_key(struct DKEvent* e)
 {
     auto usage_page = pqrs::hid::usage_page::value_t(e->page);
     if(usage_page == pqrs::hid::usage_page::keyboard_or_keypad)
