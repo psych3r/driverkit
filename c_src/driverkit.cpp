@@ -179,6 +179,7 @@ int get_consume_kb_iter(Func consume)
     if(iter == IO_OBJECT_NULL) return 1;
     for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
         consume(curr);
+    IOObjectRelease(iter);
     return 0;
 }
 
@@ -252,7 +253,7 @@ extern "C" {
                 return true;
             }
         }
-
+        IOObjectRelease(iter);
         CFRelease(device);
         return false;
     }
