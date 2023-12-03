@@ -15,10 +15,10 @@
 
 int init_sink(void);
 int exit_sink(void);
-bool driver_activated(void);
+extern "C" bool driver_activated(void);
 
 /*
- * Key event information that's shared between C++ and Haskell.
+ * Key event information that's shared between C++ and Rust
  *
  * value: represents key up or key down
  * page: represents IOKit usage page
@@ -151,6 +151,73 @@ extern "C" int wait_key(struct KeyEvent* e)
     return read(fd[0], e, sizeof(struct KeyEvent)) == sizeof(struct KeyEvent);
 }
 
+int device_matches(char* product)
+{
+    if (!product) return 0; // not specified, connect all devices
+
+    kern_return_t kr;
+    CFMutableDictionaryRef matching_dictionary = IOServiceMatching(kIOHIDDeviceKey);
+    if(!matching_dictionary)
+    {
+        print_iokit_error("IOServiceMatching");
+        return 1;
+    }
+    UInt32 value;
+    CFNumberRef cfValue;
+    value = kHIDPage_GenericDesktop;
+    cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
+    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsagePageKey), cfValue);
+    CFRelease(cfValue);
+    value = kHIDUsage_GD_Keyboard;
+    cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
+    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsageKey), cfValue);
+    CFRelease(cfValue);
+    io_iterator_t iter = IO_OBJECT_NULL;
+    CFRetain(matching_dictionary);
+    kr = IOServiceGetMatchingServices(kIOMainPortDefault,
+                                      matching_dictionary,
+                                      &iter);
+    if(kr != KERN_SUCCESS)
+    {
+        print_iokit_error("IOServiceGetMatchingServices", kr);
+        return 1;
+    }
+
+    io_name_t name;
+    CFStringRef cfproduct = NULL;
+
+    cfproduct = CFStringCreateWithCString(kCFAllocatorDefault, product, CFStringGetSystemEncoding());
+    if(cfproduct == NULL)
+    {
+        print_iokit_error("CFStringCreateWithCString");
+        return 1;
+    }
+
+    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
+    {
+        CFStringRef cfcurr = (CFStringRef)IORegistryEntryCreateCFProperty(curr, CFSTR(kIOHIDProductKey), kCFAllocatorDefault,
+                             kIOHIDOptionsTypeNone);
+        if(cfcurr == NULL)
+        {
+            print_iokit_error("IORegistryEntryCreateCFProperty");
+            continue;
+        }
+
+        bool match = (CFStringCompare(cfcurr, cfproduct, 0) == kCFCompareEqualTo);
+
+        CFRelease(cfcurr);
+        if(!match) continue;
+        else
+        {
+            CFRelease(cfproduct);
+            return 0;
+        }
+    }
+
+    CFRelease(cfproduct);
+    return 1;
+}
+
 /*
  * For each keyboard, registers an asynchronous callback to run when
  * new input from the user is available from that keyboard. Then
@@ -236,7 +303,6 @@ void monitor_kb(char* product)
  */
 extern "C" int grab_kb(char* product)
 {
-    if (!driver_activated()) return 13;
     // Source
     if (pipe(fd) == -1)
     {
@@ -259,7 +325,6 @@ extern "C" int grab_kb(char* product)
  */
 extern "C" int release_kb()
 {
-    if (!driver_activated()) return 0;
     int retval = 0;
     kern_return_t kr;
     // Source
@@ -303,8 +368,6 @@ std::string CFStringToStdString(CFStringRef cfString)
 
 extern "C" int list_keyboards()
 {
-    std::vector<std::string> keeb_list;
-    keeb_list.push_back("");
     CFMutableDictionaryRef matching_dictionary = IOServiceMatching(kIOHIDDeviceKey);
     if(!matching_dictionary)
     {
@@ -330,6 +393,6 @@ extern "C" int list_keyboards()
     }
     for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
         std::cout << CFStringToStdString((CFStringRef)IORegistryEntryCreateCFProperty(curr, CFSTR("Product"), kCFAllocatorDefault,
-                             kIOHIDOptionsTypeNone)) << std::endl;
+                                         kIOHIDOptionsTypeNone)) << std::endl;
     return 0;
 }
