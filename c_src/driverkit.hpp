@@ -7,19 +7,30 @@
 #include <iostream>
 #include <mach/mach_error.h>
 #include <AvailabilityMacros.h>
+#include <filesystem> // Include this before virtual_hid_device_service.hpp to avoid compile error
+#include "virtual_hid_device_driver.hpp"
+#include "virtual_hid_device_service.hpp"
 
 /* The name was changed from "Master" to "Main" in Apple SDK 12.0 (Monterey) */
 #if (MAC_OS_X_VERSION_MIN_REQUIRED < 120000) // Before macOS 12 Monterey
     #define kIOMainPortDefault kIOMasterPortDefault
 #endif
 
-int init_sink(void);
-int exit_sink(void);
-extern "C" bool driver_activated(void);
+static pqrs::karabiner::driverkit::virtual_hid_device_service::client* client;
+static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::keyboard_input keyboard;
+static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_top_case_input top_case;
+static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_keyboard_input apple_keyboard;
+static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::consumer_input consumer;
+
+static std::thread thread;
+static CFRunLoopRef listener_loop;
+static std::map<io_service_t, IOHIDDeviceRef> source_device;
+static int fd[2];
+static char* prod = nullptr;
+static CFMutableDictionaryRef matching_dictionary = NULL;
 
 /*
  * Key event information that's shared between C++ and Rust
- *
  * value: represents key up or key down
  * page: represents IOKit usage page
  * code: represents IOKit usage
@@ -31,368 +42,34 @@ struct DKEvent
     uint32_t code;
 };
 
-/*
- * These are needed to receive unaltered key events from the OS.
- */
-static std::thread thread;
-static CFRunLoopRef listener_loop;
-static std::map<io_service_t, IOHIDDeviceRef> source_device;
-static int fd[2];
-static char* prod = nullptr;
+int init_sink(void);
+int exit_sink(void);
+void print_iokit_error(const char* fname, int freturn = 0);
+void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef value);
+void matched_callback(void* context, io_iterator_t iter);
+void terminated_callback(void* context, io_iterator_t iter);
+void monitor_kb(char* product);
 
-void print_iokit_error(const char* fname, int freturn = 0)
-{
-    std::cerr << fname << " error";
-    if(freturn)
-    {
-        //std::cerr << " " << std::hex << freturn;
-        std::cerr << ": ";
-        std::cerr << mach_error_string(freturn);
-    }
-    std::cerr << std::endl;
-}
+void monitor_keeb(char* product);
+void close_registered_devices();
+void register_keeb(mach_port_t keeb);
+void init_keyboards_dictionary();
+io_iterator_t get_keyboards_iterator();
+std::string CFStringToStdString(CFStringRef cfString);
 
-/*
- * We'll register this callback to run whenever an IOHIDDevice
- * (representing a keyboard) sends input from the user.
- *
- * It passes the relevant information into a pipe that will be read
- * from with wait_key.
- */
-void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef value)
-{
-    struct DKEvent e;
-    IOHIDElementRef element = IOHIDValueGetElement(value);
-    e.value = IOHIDValueGetIntegerValue(value);
-    e.page = IOHIDElementGetUsagePage(element);
-    e.code = IOHIDElementGetUsage(element);
-    write(fd[1], &e, sizeof(struct DKEvent));
-}
+template <typename Func>
+int get_consume_kb_iter(Func consume);
+CFStringRef from_cstr( const char* str);
+CFStringRef get_property(mach_port_t item, const char* property);
 
-void open_matching_devices(char* product, io_iterator_t iter)
-{
-    io_name_t name;
-    kern_return_t kr;
-    CFStringRef cfproduct = NULL;
-    if(product)
-    {
-        cfproduct = CFStringCreateWithCString(kCFAllocatorDefault, product, CFStringGetSystemEncoding());
-        if(cfproduct == NULL)
-        {
-            print_iokit_error("CFStringCreateWithCString");
-            return;
-        }
-    }
-    CFStringRef cfkarabiner = CFStringCreateWithCString(kCFAllocatorDefault, "Karabiner VirtualHIDKeyboard",
-                              CFStringGetSystemEncoding());
-    if(cfkarabiner == NULL)
-    {
-        print_iokit_error("CFStringCreateWithCString");
-        if(product)
-            CFRelease(cfproduct);
-        return;
-    }
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
-    {
-        CFStringRef cfcurr = (CFStringRef)IORegistryEntryCreateCFProperty(curr, CFSTR(kIOHIDProductKey), kCFAllocatorDefault,
-                             kIOHIDOptionsTypeNone);
-        if(cfcurr == NULL)
-        {
-            print_iokit_error("IORegistryEntryCreateCFProperty");
-            continue;
-        }
-        bool match = (CFStringCompare(cfcurr, cfkarabiner, 0) != kCFCompareEqualTo);
-        if(product)
-            match = match && (CFStringCompare(cfcurr, cfproduct, 0) == kCFCompareEqualTo);
-        CFRelease(cfcurr);
-        //if(!match && product) continue;
-        if(!match) continue;
-        IOHIDDeviceRef dev = IOHIDDeviceCreate(kCFAllocatorDefault, curr);
-        source_device[curr] = dev;
-        IOHIDDeviceRegisterInputValueCallback(dev, input_callback, NULL);
-        kr = IOHIDDeviceOpen(dev, kIOHIDOptionsTypeSeizeDevice);
-        if(kr != kIOReturnSuccess)
-            print_iokit_error("IOHIDDeviceOpen", kr);
-        IOHIDDeviceScheduleWithRunLoop(dev, listener_loop, kCFRunLoopDefaultMode);
-    }
-    if(product)
-        CFRelease(cfproduct);
-    CFRelease(cfkarabiner);
-}
+extern "C" {
+    int grab_kb(char* product);
+    int send_key(struct DKEvent* e);
+    int wait_key(struct DKEvent* e);
+    int release_kb();
 
-/*
- * We'll register this callback to run whenever an IOHIDDevice
- * (representing a keyboard) is connected to the OS
- *
- */
-void matched_callback(void* context, io_iterator_t iter)
-{
-    char* product = (char*)context;
-    open_matching_devices(product, iter);
-}
-
-/*
- * We'll register this callback to run whenever an IOHIDDevice
- * (representing a keyboard) is disconnected from the OS
- *
- */
-void terminated_callback(void* context, io_iterator_t iter)
-{
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
-        source_device.erase(curr);
-}
-
-/*
- * Reads a new key event from the pipe, blocking until a new event is
- * ready.
- */
-extern "C" int wait_key(struct DKEvent* e)
-{
-    return read(fd[0], e, sizeof(struct DKEvent)) == sizeof(struct DKEvent);
-}
-
-extern "C" int device_matches(char* product)
-{
-    if (!product) return 0; // not specified, connect all devices
-
-    kern_return_t kr;
-    CFMutableDictionaryRef matching_dictionary = IOServiceMatching(kIOHIDDeviceKey);
-    if(!matching_dictionary)
-    {
-        print_iokit_error("IOServiceMatching");
-        return 1;
-    }
-    UInt32 value;
-    CFNumberRef cfValue;
-    value = kHIDPage_GenericDesktop;
-    cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
-    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsagePageKey), cfValue);
-    CFRelease(cfValue);
-    value = kHIDUsage_GD_Keyboard;
-    cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
-    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsageKey), cfValue);
-    CFRelease(cfValue);
-    io_iterator_t iter = IO_OBJECT_NULL;
-    CFRetain(matching_dictionary);
-    kr = IOServiceGetMatchingServices(kIOMainPortDefault,
-                                      matching_dictionary,
-                                      &iter);
-    if(kr != KERN_SUCCESS)
-    {
-        print_iokit_error("IOServiceGetMatchingServices", kr);
-        return 1;
-    }
-
-    io_name_t name;
-    CFStringRef cfproduct = NULL;
-
-    cfproduct = CFStringCreateWithCString(kCFAllocatorDefault, product, CFStringGetSystemEncoding());
-    if(cfproduct == NULL)
-    {
-        print_iokit_error("CFStringCreateWithCString");
-        return 1;
-    }
-
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
-    {
-        CFStringRef cfcurr = (CFStringRef)IORegistryEntryCreateCFProperty(curr, CFSTR(kIOHIDProductKey), kCFAllocatorDefault,
-                             kIOHIDOptionsTypeNone);
-        if(cfcurr == NULL)
-        {
-            print_iokit_error("IORegistryEntryCreateCFProperty");
-            continue;
-        }
-
-        bool match = (CFStringCompare(cfcurr, cfproduct, 0) == kCFCompareEqualTo);
-
-        CFRelease(cfcurr);
-        if(!match) continue;
-        else
-        {
-            CFRelease(cfproduct);
-            return 0;
-        }
-    }
-
-    CFRelease(cfproduct);
-    return 1;
-}
-
-/*
- * For each keyboard, registers an asynchronous callback to run when
- * new input from the user is available from that keyboard. Then
- * sleeps indefinitely, ready to received asynchronous callbacks.
- */
-void monitor_kb(char* product)
-{
-    kern_return_t kr;
-    CFMutableDictionaryRef matching_dictionary = IOServiceMatching(kIOHIDDeviceKey);
-    if(!matching_dictionary)
-    {
-        print_iokit_error("IOServiceMatching");
-        return;
-    }
-    UInt32 value;
-    CFNumberRef cfValue;
-    value = kHIDPage_GenericDesktop;
-    cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
-    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsagePageKey), cfValue);
-    CFRelease(cfValue);
-    value = kHIDUsage_GD_Keyboard;
-    cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
-    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsageKey), cfValue);
-    CFRelease(cfValue);
-    io_iterator_t iter = IO_OBJECT_NULL;
-    CFRetain(matching_dictionary);
-    kr = IOServiceGetMatchingServices(kIOMainPortDefault,
-                                      matching_dictionary,
-                                      &iter);
-    if(kr != KERN_SUCCESS)
-    {
-        print_iokit_error("IOServiceGetMatchingServices", kr);
-        return;
-    }
-    listener_loop = CFRunLoopGetCurrent();
-    open_matching_devices(product, iter);
-    IONotificationPortRef notification_port = IONotificationPortCreate(kIOMainPortDefault);
-    CFRunLoopSourceRef notification_source = IONotificationPortGetRunLoopSource(notification_port);
-    CFRunLoopAddSource(listener_loop, notification_source, kCFRunLoopDefaultMode);
-    CFRetain(matching_dictionary);
-    kr = IOServiceAddMatchingNotification(notification_port,
-                                          kIOMatchedNotification,
-                                          matching_dictionary,
-                                          matched_callback,
-                                          product,
-                                          &iter);
-    if(kr != KERN_SUCCESS)
-    {
-        print_iokit_error("IOServiceAddMatchingNotification", kr);
-        return;
-    }
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {}
-    kr = IOServiceAddMatchingNotification(notification_port,
-                                          kIOTerminatedNotification,
-                                          matching_dictionary,
-                                          terminated_callback,
-                                          NULL,
-                                          &iter);
-    if(kr != KERN_SUCCESS)
-    {
-        print_iokit_error("IOServiceAddMatchingNotification", kr);
-        return;
-    }
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {}
-    CFRunLoopRun();
-    for(std::pair<const io_service_t, IOHIDDeviceRef> p : source_device)
-    {
-        kr = IOHIDDeviceClose(p.second, kIOHIDOptionsTypeSeizeDevice);
-        if(kr != KERN_SUCCESS)
-            print_iokit_error("IOHIDDeviceClose", kr);
-    }
-}
-
-/*
- * Opens and seizes input from each keyboard device whose product name
- * matches the parameter (if NULL is received, then it opens all
- * keyboard devices). Spawns a thread to receive asynchronous input
- * and opens a pipe for this thread to send key event data to the main
- * thread.
- *
- * Loads a the karabiner kernel extension that will send key events
- * back to the OS.
- */
-extern "C" int grab_kb(char* product)
-{
-    // Source
-    if (pipe(fd) == -1)
-    {
-        std::cerr << "pipe error: " << errno << std::endl;
-        return errno;
-    }
-    if(product)
-    {
-        prod = (char*)malloc(strlen(product) + 1);
-        strcpy(prod, product);
-    }
-    thread = std::thread{monitor_kb, prod};
-    // Sink
-    return init_sink();
-}
-
-/*
- * Releases the resources needed to receive key events from and send
- * key events to the OS.
- */
-extern "C" int release_kb()
-{
-    int retval = 0;
-    kern_return_t kr;
-    // Source
-    if(thread.joinable())
-    {
-        CFRunLoopStop(listener_loop);
-        thread.join();
-    }
-    else
-        std::cerr << "No thread was running!" << std::endl;
-    if(prod)
-        free(prod);
-    if (close(fd[0]) == -1)
-    {
-        std::cerr << "close error: " << errno << std::endl;
-        retval = 1;
-    }
-    if (close(fd[1]) == -1)
-    {
-        std::cerr << "close error: " << errno << std::endl;
-        retval = 1;
-    }
-    // Sink
-    if(exit_sink()) retval = 1;
-    return retval;
-}
-
-std::string CFStringToStdString(CFStringRef cfString)
-{
-    if (cfString == nullptr)  return std::string();
-    CFIndex length = CFStringGetLength(cfString);
-    CFIndex maxSize = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
-    std::string utf8String(maxSize, '\0');
-    if (CFStringGetCString(cfString, &utf8String[0], maxSize, kCFStringEncodingUTF8))
-    {
-        utf8String.resize(strlen( utf8String.c_str()));
-        return utf8String;
-    }
-    return std::string();
-}
-
-extern "C" int list_keyboards()
-{
-    CFMutableDictionaryRef matching_dictionary = IOServiceMatching(kIOHIDDeviceKey);
-    if(!matching_dictionary)
-    {
-        fprintf(stderr, "IOServiceMatching failed");
-        return 1;
-    }
-    UInt32 value = kHIDPage_GenericDesktop;
-    CFNumberRef cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
-    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsagePageKey), cfValue);
-    CFRelease(cfValue);
-    value = kHIDUsage_GD_Keyboard;
-    cfValue = CFNumberCreate( kCFAllocatorDefault, kCFNumberSInt32Type, &value );
-    CFDictionarySetValue(matching_dictionary, CFSTR(kIOHIDDeviceUsageKey), cfValue);
-    CFRelease(cfValue);
-    io_iterator_t iter = IO_OBJECT_NULL;
-    kern_return_t r = IOServiceGetMatchingServices(kIOMainPortDefault,
-                      matching_dictionary,
-                      &iter);
-    if(r != KERN_SUCCESS)
-    {
-        fprintf(stderr, "IOServiceGetMatchingServices failed");
-        return r;
-    }
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
-        std::cout << CFStringToStdString((CFStringRef)IORegistryEntryCreateCFProperty(curr, CFSTR("Product"), kCFAllocatorDefault,
-                                         kIOHIDOptionsTypeNone)) << std::endl;
-    return 0;
+    void list_keyboards();
+    bool device_matches(const char* product);
+    bool driver_activated(void);
+    void register_matching_devices(char* product, io_iterator_t iter);
 }
