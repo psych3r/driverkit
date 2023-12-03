@@ -14,7 +14,7 @@ static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_
 static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_keyboard_input apple_keyboard;
 static pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::consumer_input consumer;
 
-bool driver_activated(void)
+extern "C" bool driver_activated(void)
 {
     std::string service_name("org_pqrs_Karabiner_DriverKit_VirtualHIDDeviceRoot");
     auto service = IOServiceGetMatchingService(type_safe::get(pqrs::osx::iokit_mach_port::null),
