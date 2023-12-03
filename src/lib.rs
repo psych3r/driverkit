@@ -88,11 +88,11 @@ fn grab(product: &str) -> i32 {
     ret
 }
 
-fn driver_activated() -> bool {
+pub fn driver_activated() -> bool {
     unsafe { interface::driver_activated() }
 }
 
-fn device_matches(product: &str) -> bool {
+pub fn device_matches(product: &str) -> bool {
     if product.is_empty() {
         true
     } else {
