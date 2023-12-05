@@ -57,8 +57,10 @@ void terminated_callback(void* context, io_iterator_t iter);
 void open_device_if_match(const char* product, mach_port_t device);
 
 void open_device(mach_port_t keeb);
-void open_matching_devices(const char* product, io_iterator_t iter);
-void monitor_kb();
+void monitor_keeb(char* product);
+
+using callback_type = void(*)(void*, io_iterator_t);
+void subscribe_to_notification(const char* notification_type, void* cb_arg, callback_type callback);
 
 void close_registered_devices();
 void init_keyboards_dictionary();
