@@ -6,13 +6,14 @@ mod interface {
     use std::os::raw::c_char;
 
     extern "C" {
-        pub fn release_kb() -> i32;
-        pub fn grab_kb(product: *mut c_char) -> i32;
+        pub fn grab() -> i32;
+        pub fn release() -> i32;
         pub fn send_key(e: *mut DKEvent) -> i32;
         pub fn wait_key(e: *mut DKEvent) -> i32;
         pub fn list_keyboards() -> i32;
         pub fn driver_activated() -> bool;
-        pub fn device_matches(product: *mut c_char) -> i32;
+        pub fn device_matches(product: *mut c_char) -> bool;
+        pub fn register_device(product: *mut c_char);
     }
 
     #[repr(C)]
@@ -48,27 +49,21 @@ pub fn send_key(e: *mut interface::DKEvent) -> i32 {
 pub fn wait_key(e: *mut interface::DKEvent) -> i32 {
     unsafe { interface::wait_key(e) }
 }
-pub fn release_kb() -> i32 {
-    unsafe { interface::release_kb() }
+
+pub fn release() -> i32 {
+    unsafe { interface::release() }
 }
+
+/// lists the valid keyboard names to be registered with register_device()
 pub fn list_keyboards() -> i32 {
     unsafe { interface::list_keyboards() }
 }
 
-pub fn grab_kb(product: &str) -> Result<(), GrabError> {
-    if !driver_activated() {
-        Err(GrabError::DriverInactive)
-    } else if !device_matches(product) {
-        Err(GrabError::DeviceMismatch)
-    } else {
-        match grab(product) {
-            0 => Ok(()),
-            _ => Err(GrabError::GrabbingFailed),
-        }
-    }
-}
-
-fn grab(product: &str) -> i32 {
+/// registers a device for IO control
+/// has to be called before grab()
+/// when called with an empty string
+/// registers all valid devices
+pub fn register_device(product: &str) {
     let c_str_ptr = if product.is_empty() {
         std::ptr::null_mut()
     } else {
@@ -77,7 +72,7 @@ fn grab(product: &str) -> i32 {
             .into_raw()
     };
 
-    let ret = unsafe { interface::grab_kb(c_str_ptr) };
+    unsafe { interface::register_device(c_str_ptr) };
 
     // Convert the raw pointer back to CString to free the memory
     if !product.is_empty() {
@@ -85,7 +80,24 @@ fn grab(product: &str) -> i32 {
             let _ = CString::from_raw(c_str_ptr);
         }
     }
-    ret
+}
+
+// /// Grabs registered devices, do not call before calling register_device() first
+// pub fn grab_kb(device: &str) -> Result<(), GrabError> {
+//     if !driver_activated() {
+//         Err(GrabError::DriverInactive)
+//     } else if !device_matches(device) {
+//         Err(GrabError::DeviceMismatch)
+//     } else {
+//         match grab() {
+//             0 => Ok(()),
+//             _ => Err(GrabError::GrabbingFailed),
+//         }
+//     }
+// }
+
+pub fn grab() -> bool {
+    unsafe { interface::grab()== 0 }
 }
 
 pub fn driver_activated() -> bool {
@@ -93,7 +105,7 @@ pub fn driver_activated() -> bool {
 }
 
 pub fn device_matches(product: &str) -> bool {
-    if product.is_empty() {
+    if product.is_empty() { // will match all devices in this case
         true
     } else {
         let c_str_ptr = CString::new(product)
@@ -103,6 +115,6 @@ pub fn device_matches(product: &str) -> bool {
         unsafe {
             let _ = CString::from_raw(c_str_ptr);
         }
-        ret == 0
+        ret
     }
 }
