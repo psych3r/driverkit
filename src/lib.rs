@@ -6,8 +6,6 @@ mod interface {
     use std::os::raw::c_char;
 
     extern "C" {
-        // bool device_matches(const char* product);
-        // void register_device(char* product);
         pub fn grab() -> i32;
         pub fn release();
         pub fn send_key(e: *mut DKEvent) -> i32;
@@ -15,7 +13,7 @@ mod interface {
         pub fn list_keyboards();
         pub fn driver_activated() -> bool;
         pub fn device_matches(product: *mut c_char) -> bool;
-        pub fn register_device(product: *mut c_char);
+        pub fn register_device(product: *mut c_char) -> bool;
     }
 
     #[repr(C)]
@@ -29,11 +27,7 @@ mod interface {
     impl fmt::Display for DKEvent {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             // let keycode = 0x0000FFFF & (self.page << 8 | self.code);
-            // write!(
-            //     f,
-            //     "Event: {{ type: {:#x}, code: {:#0006x}  }}",
-            //     self.value, keycode
-            // )
+            // write!( f, "Event: {{ type: {:#x}, code: {:#0006x}  }}", self.value, keycode)
             write!(
                 f,
                 "Event: {{ type: {:#x}, page: {:#x}, code: {:#x} }}",
@@ -43,33 +37,31 @@ mod interface {
     }
 }
 
-pub enum GrabError {
-    DeviceMismatch,
-    DriverInactive,
-    GrabbingFailed,
-}
-
+/// Sends a keyevent to the OS via the Karabiner-VirtualHIDDevice driver
 pub fn send_key(e: *mut interface::DKEvent) -> i32 {
     unsafe { interface::send_key(e) }
 }
+
+/// Reads a new key event, blocks until a new event is ready.
 pub fn wait_key(e: *mut interface::DKEvent) -> i32 {
     unsafe { interface::wait_key(e) }
 }
 
+/// Relinquishs control of all registered devices
 pub fn release() {
     unsafe { interface::release() }
 }
 
-/// lists the valid keyboard names to be registered with register_device()
+/// Lists the valid keyboard names to be registered with register_device()
 pub fn list_keyboards() {
     unsafe { interface::list_keyboards() }
 }
 
-/// registers a device for IO control
+/// Registers a device for IO control
 /// has to be called before grab()
 /// when called with an empty string
 /// registers all valid devices
-pub fn register_device(product: &str) {
+pub fn register_device(product: &str) -> bool {
     let c_str_ptr = if product.is_empty() {
         std::ptr::null_mut()
     } else {
@@ -78,7 +70,7 @@ pub fn register_device(product: &str) {
             .into_raw()
     };
 
-    unsafe { interface::register_device(c_str_ptr) };
+    let registered = unsafe { interface::register_device(c_str_ptr) };
 
     // Convert the raw pointer back to CString to free the memory
     if !product.is_empty() {
@@ -86,30 +78,43 @@ pub fn register_device(product: &str) {
             let _ = CString::from_raw(c_str_ptr);
         }
     }
+
+    registered
 }
 
-// /// Grabs registered devices, do not call before calling register_device() first
-// pub fn grab_kb(device: &str) -> Result<(), GrabError> {
+// checking for driver_activated and device_matches is done on kanata's side 
+// pub enum RegisterError {
+//     DriverInactive,
+//     DeviceMismatch,
+//     RegisterFailed,
+// }
+//
+// pub fn register_device(product: &str) -> Result<(), RegisterError> {
 //     if !driver_activated() {
-//         Err(GrabError::DriverInactive)
-//     } else if !device_matches(device) {
-//         Err(GrabError::DeviceMismatch)
+//         Err(RegisterError::DriverInactive)
+//     } else if !device_matches(product) {
+//         Err(RegisterError::DeviceMismatch)
+//     } else if register(product) {
+//         Ok(())
 //     } else {
-//         match grab() {
-//             0 => Ok(()),
-//             _ => Err(GrabError::GrabbingFailed),
-//         }
+//         Err(RegisterError::RegisterFailed)
 //     }
 // }
 
+/// Grabs control of registered devices and starts the monitoring loop
+/// at least on successful call to register_device has to be done before
+/// calling grab() 
 pub fn grab() -> bool {
     unsafe { interface::grab() == 0 }
 }
 
+/// Checks if Karabiner-VirtualHIDDevice-Manager is activated
+/// it has to be avtivated before registering devices
 pub fn driver_activated() -> bool {
     unsafe { interface::driver_activated() }
 }
 
+/// Checks if a device is valid and connected so it can be registered
 pub fn device_matches(product: &str) -> bool {
     if product.is_empty() {
         // will match all devices in this case
