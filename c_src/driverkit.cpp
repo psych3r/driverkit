@@ -181,15 +181,19 @@ void release_strings(Args... strings) {
     (CFRelease(strings), ...);
 }
 
+bool isSubstring(CFStringRef subString, CFStringRef mainString) {
+    return CFStringFind(mainString, subString, kCFCompareCaseInsensitive).location != kCFNotFound;
+}
+
 /*  * device is karabiner => return, don't open it no matter what
     * product is null     => open the device
     * product specified   => open the device if it matches product (device key requested) */
 bool open_device_if_match(const char* product, mach_port_t device) {
     CFStringRef product_key = product ? from_cstr(product) : from_cstr("");
-    CFStringRef karabiner   = from_cstr("Karabiner VirtualHIDKeyboard");
+    CFStringRef karabiner   = from_cstr("Karabiner"); //Karabiner DriverKit VirtualHIDKeyboard 1.7.0
     CFStringRef device_key  = get_property(device, kIOHIDProductKey);
 
-    if( !device_key || CFStringCompare(device_key, karabiner, 0) == kCFCompareEqualTo ) {
+    if( !device_key || isSubstring(karabiner, device_key) ) {
         release_strings(karabiner, device_key, product_key);
         return false;
     }
@@ -333,7 +337,7 @@ int main() {
     //     "register_device(NULL): " << register_device(NULL) << std::endl <<
     //     "register_device(appl): " << register_device("Apple Internal Keyboard / Trackpad") << std::endl <<
     //     "register_device(____): " << register_device("nano") << std::noboolalpha << std::endl;
-    const char* keeb = "Apple Internal Keyboard / Trackpad";
+    // const char* keeb = "Apple Internal Keyboard / Trackpad";
     register_device("kbd67mkiirgb v3");
     //register_device(NULL);
     //register_device(keeb);

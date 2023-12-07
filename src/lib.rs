@@ -26,13 +26,9 @@ mod interface {
 
     impl fmt::Display for DKEvent {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            // let keycode = 0x0000FFFF & (self.page << 8 | self.code);
-            // write!( f, "Event: {{ type: {:#x}, code: {:#0006x}  }}", self.value, keycode)
-            write!(
-                f,
-                "Event: {{ type: {:#x}, page: {:#x}, code: {:#x} }}",
-                self.value, self.page, self.code
-            )
+            let keycode = 0x0000FFFF & (self.page << 8 | self.code);
+            write!( f, "Event: {{ type: {:#x}, code: {:#0006x}  }}", self.value, keycode)
+            // write!( f, "Event: {{ type: {:#x}, page: {:#x}, code: {:#x} }}", self.value, self.page, self.code)
         }
     }
 }

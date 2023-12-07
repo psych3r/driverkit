@@ -34,6 +34,7 @@ std::mutex mtx;
 std::condition_variable cv;
 bool listener_initialized = false;
 bool ready_to_loop = false;
+
 using callback_type = void(*)(void*, io_iterator_t);
 
 /*
@@ -76,6 +77,7 @@ template<typename... Args>
 void release_strings(Args... strings);
 CFStringRef from_cstr( const char* str);
 CFStringRef get_property(mach_port_t item, const char* property);
+bool isSubstring(CFStringRef subString, CFStringRef mainString);
 
 extern "C" {
     int grab();
