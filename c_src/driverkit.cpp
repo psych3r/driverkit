@@ -107,7 +107,6 @@ void matched_callback(void* context, io_iterator_t iter) {
 
 void terminated_callback(void* context, io_iterator_t iter) {
     // std::cout << "term cb called" << std::endl;
-    char* product = (char*)context;
     for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
         source_devices.erase(curr);
 }
@@ -149,7 +148,7 @@ void init_keyboards_dictionary() {
 io_iterator_t get_keyboards_iterator() {
     io_iterator_t iter = IO_OBJECT_NULL;
     CFRetain(matching_dictionary);
-    kern_return_t kr = IOServiceGetMatchingServices(kIOMainPortDefault, matching_dictionary, &iter);
+    IOServiceGetMatchingServices(kIOMainPortDefault, matching_dictionary, &iter);
     return iter;
 }
 
@@ -307,18 +306,17 @@ extern "C" {
     }
 }
 
+// main function is just for testing
+// build as binary command:
+// g++ c_src/driverkit.cpp -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include -std=c++2a -framework IOKit -framework CoreFoundation -o driverkit
 int main() {
     list_keyboards();
-    std::cout << "connected" << std::endl;
-    //const char* keeb = ;
-    std::cout <<
-              device_matches("") << " " << device_matches(NULL) << " " << device_matches("Apple Internal Keyboard / Trackpad")
-              << " " << device_matches("nano")
-              << std::endl;
-    const char* kebw = "Apple Internal Keyboard / Trackpad";
+    std::cout << device_matches(NULL) << " " << device_matches("Apple Internal Keyboard / Trackpad") <<
+              " " << device_matches("nano") << std::endl;
+    const char* keeb = "Apple Internal Keyboard / Trackpad";
     register_device("kbd67mkiirgb v3");
     //register_device(NULL);
-    //register_device(kebw);
+    //register_device(keeb);
     notify_start_loop();
     std::cout << "monitored " << std::endl;
     thread.join();
