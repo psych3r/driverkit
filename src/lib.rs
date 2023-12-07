@@ -6,11 +6,13 @@ mod interface {
     use std::os::raw::c_char;
 
     extern "C" {
+        // bool device_matches(const char* product);
+        // void register_device(char* product);
         pub fn grab() -> i32;
-        pub fn release() -> i32;
+        pub fn release();
         pub fn send_key(e: *mut DKEvent) -> i32;
         pub fn wait_key(e: *mut DKEvent) -> i32;
-        pub fn list_keyboards() -> i32;
+        pub fn list_keyboards();
         pub fn driver_activated() -> bool;
         pub fn device_matches(product: *mut c_char) -> bool;
         pub fn register_device(product: *mut c_char);
@@ -26,13 +28,17 @@ mod interface {
 
     impl fmt::Display for DKEvent {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            let keycode = 0x0000FFFF & (self.page << 8 | self.code);
+            // let keycode = 0x0000FFFF & (self.page << 8 | self.code);
+            // write!(
+            //     f,
+            //     "Event: {{ type: {:#x}, code: {:#0006x}  }}",
+            //     self.value, keycode
+            // )
             write!(
                 f,
-                "Event: {{ type: {:#x}, code: {:#0006x}  }}",
-                self.value, keycode
+                "Event: {{ type: {:#x}, page: {:#x}, code: {:#x} }}",
+                self.value, self.page, self.code
             )
-            //write!(f, "Event: {{ type: {:#x}, page: {:#x}, code: {:#x}  }}", self.value, self.page, self.code)
         }
     }
 }
@@ -50,12 +56,12 @@ pub fn wait_key(e: *mut interface::DKEvent) -> i32 {
     unsafe { interface::wait_key(e) }
 }
 
-pub fn release() -> i32 {
+pub fn release() {
     unsafe { interface::release() }
 }
 
 /// lists the valid keyboard names to be registered with register_device()
-pub fn list_keyboards() -> i32 {
+pub fn list_keyboards() {
     unsafe { interface::list_keyboards() }
 }
 
@@ -97,7 +103,7 @@ pub fn register_device(product: &str) {
 // }
 
 pub fn grab() -> bool {
-    unsafe { interface::grab()== 0 }
+    unsafe { interface::grab() == 0 }
 }
 
 pub fn driver_activated() -> bool {
@@ -105,7 +111,8 @@ pub fn driver_activated() -> bool {
 }
 
 pub fn device_matches(product: &str) -> bool {
-    if product.is_empty() { // will match all devices in this case
+    if product.is_empty() {
+        // will match all devices in this case
         true
     } else {
         let c_str_ptr = CString::new(product)
