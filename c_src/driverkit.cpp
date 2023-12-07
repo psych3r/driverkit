@@ -230,7 +230,7 @@ extern "C" {
         consume_kb_iter([](mach_port_t c) { std::cout << CFStringToStdString( get_property(c, kIOHIDProductKey) ) << std::endl; });
     }
 
-    bool driver_activated(void) {
+    bool driver_activated() {
         auto service = IOServiceGetMatchingService(type_safe::get(pqrs::osx::iokit_mach_port::null),
                        IOServiceNameMatching("org_pqrs_Karabiner_DriverKit_VirtualHIDDeviceRoot"));
         if (!service) return false;
