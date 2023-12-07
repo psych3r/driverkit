@@ -282,6 +282,10 @@ extern "C" {
      * back to the OS.
      */
     int grab() {
+        if (!thread.joinable()) {
+            std::cout << "At least one device has to be registered via register_device()" << std::endl;
+            return 1;
+        }
         if (pipe(fd) == -1) { std::cerr << "pipe error: " << errno << std::endl; return errno; }
         notify_start_loop();
         return init_sink();
