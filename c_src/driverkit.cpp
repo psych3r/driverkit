@@ -124,13 +124,17 @@ void close_registered_devices() {
     }
 }
 
-void open_device(mach_port_t keeb) {
+bool open_device(mach_port_t keeb) {
     IOHIDDeviceRef dev = IOHIDDeviceCreate(kCFAllocatorDefault, keeb);
     source_devices[keeb] = dev;
     IOHIDDeviceRegisterInputValueCallback(dev, input_callback, NULL);
     kern_return_t kr = IOHIDDeviceOpen(dev, kIOHIDOptionsTypeSeizeDevice);
-    if(kr != kIOReturnSuccess) print_iokit_error("IOHIDDeviceOpen", kr);
+    if(kr != kIOReturnSuccess) {
+        print_iokit_error("IOHIDDeviceOpen", kr);
+        return false;
+    }
     IOHIDDeviceScheduleWithRunLoop(dev, listener_loop, kCFRunLoopDefaultMode);
+    return true;
 }
 
 void init_keyboards_dictionary() {
@@ -153,14 +157,15 @@ io_iterator_t get_keyboards_iterator() {
 }
 
 template <typename Func>
-int consume_kb_iter(Func consume) {
+bool consume_kb_iter(Func consume) {
     init_keyboards_dictionary();
     io_iterator_t iter = get_keyboards_iterator();
-    if(iter == IO_OBJECT_NULL) return 1;
+    if(iter == IO_OBJECT_NULL) return false;
+    bool result = false;
     for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
-        consume(curr);
+        result = result || consume(curr);
     IOObjectRelease(iter);
-    return 0;
+    return result;
 }
 
 CFStringRef from_cstr( const char* str) {
@@ -179,18 +184,22 @@ void release_strings(Args... strings) {
 /*  * device is karabiner => return, don't open it no matter what
     * product is null     => open the device
     * product specified   => open the device if it matches product (device key requested) */
-void open_device_if_match(const char* product, mach_port_t device) {
+bool open_device_if_match(const char* product, mach_port_t device) {
     CFStringRef product_key = product ? from_cstr(product) : from_cstr("");
     CFStringRef karabiner   = from_cstr("Karabiner VirtualHIDKeyboard");
     CFStringRef device_key  = get_property(device, kIOHIDProductKey);
 
-    if( !device_key || CFStringCompare(device_key, karabiner, 0) == kCFCompareEqualTo )
-        return release_strings(karabiner, device_key, product_key);
+    if( !device_key || CFStringCompare(device_key, karabiner, 0) == kCFCompareEqualTo ) {
+        release_strings(karabiner, device_key, product_key);
+        return false;
+    }
 
+    bool opened = false;
     if( !product || (CFStringCompare(device_key, product_key, 0) == kCFCompareEqualTo))
-        open_device(device);
+        opened = open_device(device);
 
     release_strings(karabiner, device_key, product_key);
+    return opened;
 }
 
 using callback_type = void(*)(void*, io_iterator_t);
@@ -203,13 +212,14 @@ void subscribe_to_notification(const char* notification_type, void* cb_arg, call
     for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {} // mystery, doesn't work without this line!!!
 }
 
-void register_device(char* product) {
+bool register_device(char* product) {
     fire_thread_once();
     block_till_listener_init();
-    consume_kb_iter([product](mach_port_t c) { open_device_if_match(product, c); });
+    bool opened = consume_kb_iter([product](mach_port_t c) { return open_device_if_match(product, c); });
     CFRunLoopAddSource(listener_loop, IONotificationPortGetRunLoopSource(notification_port), kCFRunLoopDefaultMode);
     subscribe_to_notification(kIOMatchedNotification, product, matched_callback);
     subscribe_to_notification(kIOTerminatedNotification, NULL, terminated_callback);
+    return opened;
 }
 
 std::string CFStringToStdString(CFStringRef cfString) {
@@ -227,7 +237,7 @@ std::string CFStringToStdString(CFStringRef cfString) {
 extern "C" {
 
     void list_keyboards() { // CFStringGetCStringPtr(cfString, kCFStringEncodingUTF8)
-        consume_kb_iter([](mach_port_t c) { std::cout << CFStringToStdString( get_property(c, kIOHIDProductKey) ) << std::endl; });
+        consume_kb_iter([](mach_port_t c) { std::cout << CFStringToStdString( get_property(c, kIOHIDProductKey) ) << std::endl; return true;});
     }
 
     bool driver_activated() {
@@ -311,8 +321,14 @@ extern "C" {
 // g++ c_src/driverkit.cpp -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include -std=c++2a -framework IOKit -framework CoreFoundation -o driverkit
 int main() {
     list_keyboards();
-    std::cout << device_matches(NULL) << " " << device_matches("Apple Internal Keyboard / Trackpad") <<
-              " " << device_matches("nano") << std::endl;
+    std::cout << "test device_matches:" << std::boolalpha << std::endl <<
+              "device_matches(NULL): " << device_matches(NULL) << std::endl <<
+              "device_matches(appl): " << device_matches("Apple Internal Keyboard / Trackpad") << std::endl <<
+              "device_matches(____): " << device_matches("nano") << std::noboolalpha << std::endl;
+    // std::cout << "test register_device:" << std::boolalpha << std::endl <<
+    //     "register_device(NULL): " << register_device(NULL) << std::endl <<
+    //     "register_device(appl): " << register_device("Apple Internal Keyboard / Trackpad") << std::endl <<
+    //     "register_device(____): " << register_device("nano") << std::noboolalpha << std::endl;
     const char* keeb = "Apple Internal Keyboard / Trackpad";
     register_device("kbd67mkiirgb v3");
     //register_device(NULL);
