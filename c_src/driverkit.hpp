@@ -35,6 +35,7 @@ std::mutex mtx;
 std::condition_variable cv;
 bool listener_initialized = false;
 bool ready_to_loop = false;
+using callback_type = void(*)(void*, io_iterator_t);
 
 /*
  * Key event information that's shared between C++ and Rust
@@ -48,30 +49,33 @@ struct DKEvent {
     uint32_t code;
 };
 
-int init_sink(void);
+void init_listener();
+void monitoring_loop();
 void start_monitoring();
+void fire_thread_once();
+void block_till_listener_init();
+void close_registered_devices();
+void notify_start_loop();
+int  init_sink();
+void exit_sink();
+
 void print_iokit_error(const char* fname, int freturn = 0);
 void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef value);
 void matched_callback(void* context, io_iterator_t iter);
 void terminated_callback(void* context, io_iterator_t iter);
-void open_device_if_match(const char* product, mach_port_t device);
-
-void open_device(mach_port_t keeb);
-void monitor_keeb(char* product);
-
-using callback_type = void(*)(void*, io_iterator_t);
 void subscribe_to_notification(const char* notification_type, void* cb_arg, callback_type callback);
 
-void close_registered_devices();
+void register_device(char* product);
+void open_device_if_match(const char* product, mach_port_t device);
+void open_device(mach_port_t keeb);
+
 void init_keyboards_dictionary();
 io_iterator_t get_keyboards_iterator();
 std::string CFStringToStdString(CFStringRef cfString);
-
 template <typename Func>
 int consume_kb_iter(Func consume);
 template<typename... Args>
 void release_strings(Args... strings);
-
 CFStringRef from_cstr( const char* str);
 CFStringRef get_property(mach_port_t item, const char* property);
 
@@ -84,41 +88,4 @@ extern "C" {
     void list_keyboards();
     bool device_matches(const char* product);
     bool driver_activated(void);
-}
-
-void init_listener() {
-    std::lock_guard<std::mutex> lock(mtx);
-    listener_loop = CFRunLoopGetCurrent();
-    listener_initialized = true;
-    cv.notify_one();
-}
-
-void monitoring_loop() {
-    std::unique_lock<std::mutex> lock(mtx); //was unique_lock
-    cv.wait(lock, [] { return ready_to_loop; });
-    CFRunLoopRun();
-}
-
-void fire_thread_once() { if (!thread.joinable()) thread = std::thread{start_monitoring}; }
-
-void block_till_listener_init() {
-    std::unique_lock<std::mutex> lock(mtx);
-    cv.wait(lock, [] { return listener_initialized; });
-}
-
-void notify_start_loop() {
-    std::lock_guard<std::mutex> lock(mtx);
-    ready_to_loop = true;
-    cv.notify_one();
-}
-
-void register_dev(std::string dev) {
-    fire_thread_once();
-    block_till_listener_init();
-    std::cout << "MAIN: Regesting device " << dev << " id: " << std::this_thread::get_id() << std::endl;
-}
-
-void reg() {
-    for ( int i = 0; i <= 7; ++ i)
-        register_dev(std::to_string(i));
 }

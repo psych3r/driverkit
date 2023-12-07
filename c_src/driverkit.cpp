@@ -11,6 +11,7 @@ int send_key(T& keyboard, struct DKEvent* e) {
 
 int init_sink() {
     pqrs::dispatcher::extra::initialize_shared_dispatcher();
+
     client = new pqrs::karabiner::driverkit::virtual_hid_device_service::client();
     auto copy = client;
 
@@ -50,8 +51,38 @@ int init_sink() {
     });
 
     client->async_start();
-    std::cout << "zero incoming" << std::endl;
     return 0;
+}
+
+void init_listener() {
+    std::lock_guard<std::mutex> lock(mtx);
+    listener_loop = CFRunLoopGetCurrent();
+    listener_initialized = true;
+    cv.notify_one();
+}
+
+void monitoring_loop() {
+    std::unique_lock<std::mutex> lock(mtx);
+    cv.wait(lock, [] { return ready_to_loop; });
+    CFRunLoopRun();
+}
+
+void fire_thread_once() { if (!thread.joinable()) thread = std::thread{start_monitoring}; }
+
+void block_till_listener_init() {
+    std::unique_lock<std::mutex> lock(mtx);
+    cv.wait(lock, [] { return listener_initialized; });
+}
+
+void notify_start_loop() {
+    std::lock_guard<std::mutex> lock(mtx);
+    ready_to_loop = true;
+    cv.notify_one();
+}
+
+void exit_sink() {
+    free(client);
+    pqrs::dispatcher::extra::terminate_shared_dispatcher();
 }
 
 void print_iokit_error(const char* fname, int freturn) {
@@ -68,14 +99,14 @@ void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef 
 }
 
 void matched_callback(void* context, io_iterator_t iter) {
-    std::cout << "match cb called" << std::endl; // nano
+    // std::cout << "match cb called" << std::endl;
     char* product = (char*)context;
     for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
         open_device_if_match(product, curr);
 }
 
 void terminated_callback(void* context, io_iterator_t iter) {
-    std::cout << "term cb called" << std::endl; //nano
+    // std::cout << "term cb called" << std::endl;
     char* product = (char*)context;
     for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
         source_devices.erase(curr);
@@ -170,15 +201,10 @@ void subscribe_to_notification(const char* notification_type, void* cb_arg, call
     kern_return_t kr = IOServiceAddMatchingNotification(notification_port, notification_type,
                        matching_dictionary, callback, cb_arg, &iter);
     if (kr != KERN_SUCCESS) { print_iokit_error(notification_type, kr); return; }
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {} // nano: mistery, doesn't work without this!!!
+    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {} // mystery, doesn't work without this line!!!
 }
 
-/*
- * For each keyboard, registers an asynchronous callback to run when
- * new input from the user is available from that keyboard. Then
- * sleeps indefinitely, ready to received asynchronous callbacks.
- */
-void monitor_keeb(char* product) {
+void register_device(char* product) {
     fire_thread_once();
     block_till_listener_init();
     consume_kb_iter([product](mach_port_t c) { open_device_if_match(product, c); });
@@ -201,7 +227,7 @@ std::string CFStringToStdString(CFStringRef cfString) {
 
 extern "C" {
 
-    void list_keyboards() { // nano CFStringGetCStringPtr(cfString, kCFStringEncodingUTF8)
+    void list_keyboards() { // CFStringGetCStringPtr(cfString, kCFStringEncodingUTF8)
         consume_kb_iter([](mach_port_t c) { std::cout << CFStringToStdString( get_property(c, kIOHIDProductKey) ) << std::endl; });
     }
 
@@ -216,7 +242,7 @@ extern "C" {
     // Reads a new key event from the pipe, blocking until a new event is ready.
     int wait_key(struct DKEvent* e) { return read(fd[0], e, sizeof(struct DKEvent)) == sizeof(struct DKEvent); }
 
-    bool device_matches(const char* product) { // nano, clean please
+    bool device_matches(const char* product) {
         if (!product) return true;
         init_keyboards_dictionary();
         io_iterator_t iter = get_keyboards_iterator();
@@ -258,12 +284,8 @@ extern "C" {
      */
     void release() {
         if(thread.joinable()) { CFRunLoopStop(listener_loop); thread.join(); }
-        else std::cout << "monitoring loop wasn't started" << std::endl;
-
         close(fd[0]); close(fd[1]);
-
-        free(client);
-        pqrs::dispatcher::extra::terminate_shared_dispatcher();
+        exit_sink();
     }
 
     /*
@@ -272,15 +294,6 @@ extern "C" {
      * represents a virtual keyboard).
      */
     int send_key(struct DKEvent* e) {
-
-        // switch ( pqrs::hid::usage_page::value_t(e->page)) {
-        //     case pqrs::hid::usage_page::keyboard_or_keypad:    return send_key(keyboard, e);
-        //     case pqrs::hid::usage_page::apple_vendor_top_case: return send_key(top_case, e);
-        //     case pqrs::hid::usage_page::apple_vendor_keyboard: return send_key(apple_keyboard, e);
-        //     case pqrs::hid::usage_page::consumer:              return send_key(consumer, e);
-        //     default: return 1;
-        // }
-
         auto usage_page = pqrs::hid::usage_page::value_t(e->page);
         if(usage_page == pqrs::hid::usage_page::keyboard_or_keypad)
             return send_key(keyboard, e);
@@ -291,7 +304,6 @@ extern "C" {
         else if(usage_page == pqrs::hid::usage_page::consumer)
             return send_key(consumer, e);
         else return 1;
-
     }
 }
 
@@ -300,13 +312,13 @@ int main() {
     std::cout << "connected" << std::endl;
     //const char* keeb = ;
     std::cout <<
-    device_matches("") << " " << device_matches(NULL) << " " << device_matches("Apple Internal Keyboard / Trackpad") 
-    << " " << device_matches("nano")
-    << std::endl;
+              device_matches("") << " " << device_matches(NULL) << " " << device_matches("Apple Internal Keyboard / Trackpad")
+              << " " << device_matches("nano")
+              << std::endl;
     const char* kebw = "Apple Internal Keyboard / Trackpad";
-    monitor_keeb("kbd67mkiirgb v3");
-    //monitor_keeb(NULL);
-    //monitor_keeb(kebw);
+    register_device("kbd67mkiirgb v3");
+    //register_device(NULL);
+    //register_device(kebw);
     notify_start_loop();
     std::cout << "monitored " << std::endl;
     thread.join();
