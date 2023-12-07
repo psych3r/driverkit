@@ -65,14 +65,14 @@ void matched_callback(void* context, io_iterator_t iter);
 void terminated_callback(void* context, io_iterator_t iter);
 void subscribe_to_notification(const char* notification_type, void* cb_arg, callback_type callback);
 
-void open_device_if_match(const char* product, mach_port_t device);
-void open_device(mach_port_t keeb);
+bool open_device_if_match(const char* product, mach_port_t device);
+bool open_device(mach_port_t keeb);
 
 void init_keyboards_dictionary();
 io_iterator_t get_keyboards_iterator();
 std::string CFStringToStdString(CFStringRef cfString);
 template <typename Func>
-int consume_kb_iter(Func consume);
+bool consume_kb_iter(Func consume);
 template<typename... Args>
 void release_strings(Args... strings);
 CFStringRef from_cstr( const char* str);
@@ -87,5 +87,5 @@ extern "C" {
     void list_keyboards();
     bool device_matches(const char* product);
     bool driver_activated();
-    void register_device(char* product);
+    bool register_device(char* product);
 }
