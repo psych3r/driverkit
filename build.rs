@@ -14,6 +14,4 @@ fn main() {
     println!("cargo:rerun-if-changed=c_src/c_src/driverkit.cpp");
     println!("cargo:rustc-link-lib=framework=IOKit");
     println!("cargo:rustc-link-lib=framework=CoreFoundation");
-
-    //cc c_src/list-keyboards.c -o list-keyboards -framework IOKit -framework CoreFoundation
 }
