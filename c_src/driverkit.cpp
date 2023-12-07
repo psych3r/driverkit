@@ -318,6 +318,5 @@ int main() {
     //register_device(NULL);
     //register_device(keeb);
     notify_start_loop();
-    std::cout << "monitored " << std::endl;
     thread.join();
 }
