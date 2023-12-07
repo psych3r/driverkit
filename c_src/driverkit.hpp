@@ -29,7 +29,6 @@ std::thread thread;
 CFRunLoopRef listener_loop;
 std::map<io_service_t, IOHIDDeviceRef> source_devices;
 int fd[2];
-//static char* prod = nullptr;
 CFMutableDictionaryRef matching_dictionary = NULL;
 std::mutex mtx;
 std::condition_variable cv;
