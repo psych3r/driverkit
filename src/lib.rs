@@ -27,7 +27,11 @@ mod interface {
     impl fmt::Display for DKEvent {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             let keycode = 0x0000FFFF & (self.page << 8 | self.code);
-            write!( f, "Event: {{ type: {:#x}, code: {:#0006x}  }}", self.value, keycode)
+            write!(
+                f,
+                "Event: {{ type: {:#x}, code: {:#0006x}  }}",
+                self.value, keycode
+            )
             // write!( f, "Event: {{ type: {:#x}, page: {:#x}, code: {:#x} }}", self.value, self.page, self.code)
         }
     }
@@ -41,6 +45,15 @@ pub fn send_key(e: *mut interface::DKEvent) -> i32 {
 /// Reads a new key event, blocks until a new event is ready.
 pub fn wait_key(e: *mut interface::DKEvent) -> i32 {
     unsafe { interface::wait_key(e) }
+    // unsafe {
+    //     let r = interface::wait_key(e);
+    //     // don't know why macos emmits such events with every press/release
+    //     // they can be ommited or not, kanata will work either way
+    //     if (*e).value > 1 || (*e).code == 0xffffffff || (*e).code == 0x1 {
+    //         wait_key(e);
+    //     }
+    //     r
+    // }
 }
 
 /// Relinquishs control of all registered devices
@@ -78,7 +91,7 @@ pub fn register_device(product: &str) -> bool {
     registered
 }
 
-// checking for driver_activated and device_matches is done on kanata's side 
+// checking for driver_activated and device_matches is done on kanata's side
 // pub enum RegisterError {
 //     DriverInactive,
 //     DeviceMismatch,
@@ -99,7 +112,7 @@ pub fn register_device(product: &str) -> bool {
 
 /// Grabs control of registered devices and starts the monitoring loop
 /// at least on successful call to register_device has to be done before
-/// calling grab() 
+/// calling grab()
 pub fn grab() -> bool {
     unsafe { interface::grab() == 0 }
 }
