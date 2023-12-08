@@ -301,6 +301,7 @@ extern "C" {
      */
     void release() {
         if(thread.joinable()) { CFRunLoopStop(listener_loop); thread.join(); }
+        keyboard.keys.clear();
         close(fd[0]); close(fd[1]);
         exit_sink();
     }
