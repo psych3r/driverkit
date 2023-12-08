@@ -1,5 +1,5 @@
 [package]
-name = "driverkit"
+name = "karabiner-driverkit"
 version = "0.1.0"
 authors = ["Psych3r <abdalrahman.mursi@gmail.com>"]
 description = "Minimal Karabiner-DriverKit-VirtualHIDDevice wrapper for kanata"
