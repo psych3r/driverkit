@@ -5,7 +5,7 @@ int send_key(T& keyboard, struct DKEvent* e) {
     if(e->value == 1) keyboard.keys.insert(e->code);
     else if(e->value == 0) keyboard.keys.erase(e->code);
     else return 1;
-#if defined(__MAC_10_12) || defined(__MAC_10_13) || defined(__MAC_10_14) || defined(__MAC_10_15)
+#ifdef USE_KEXT
     return pqrs::karabiner_virtual_hid_device_methods::post_keyboard_input_report(connect, keyboard);
 #else
     client->async_post_report(keyboard);
@@ -13,7 +13,7 @@ int send_key(T& keyboard, struct DKEvent* e) {
 #endif
 }
 
-#if defined(__MAC_10_12) || defined(__MAC_10_13) || defined(__MAC_10_14) || defined(__MAC_10_15)
+#ifdef USE_KEXT
     int init_sink() {
         kern_return_t kr;
         connect = IO_OBJECT_NULL;
@@ -134,7 +134,7 @@ void notify_start_loop() {
     cv.notify_one();
 }
 
-#if defined(__MAC_10_12) || defined(__MAC_10_13) || defined(__MAC_10_14) || defined(__MAC_10_15)
+#ifdef USE_KEXT
     int exit_sink() {
         int retval = 0;
         kern_return_t kr = pqrs::karabiner_virtual_hid_device_methods::reset_virtual_hid_keyboard(connect);
@@ -392,7 +392,7 @@ extern "C" {
      * represents a virtual keyboard).
      */
     int send_key(struct DKEvent* e) {
-#if defined(__MAC_10_12) || defined(__MAC_10_13) || defined(__MAC_10_14) || defined(__MAC_10_15)
+#ifdef USE_KEXT
         auto usage_page = pqrs::karabiner_virtual_hid_device::usage_page(e->page);
         if(usage_page == pqrs::karabiner_virtual_hid_device::usage_page::keyboard_or_keypad)
             return send_key(keyboard, e);

@@ -18,7 +18,7 @@
     #define kIOMainPortDefault kIOMasterPortDefault
 #endif
 
-#if defined(__MAC_10_12) || defined(__MAC_10_13) || defined(__MAC_10_14) || defined(__MAC_10_15)
+#ifdef USE_KEXT
     #include "karabiner_virtual_hid_device_methods.hpp"
     mach_port_t connect;
     io_service_t service;
