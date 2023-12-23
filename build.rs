@@ -9,6 +9,8 @@ fn main() {
         .shared_flag(true)
         .flag("-fPIC")
         .compile("driverkit");
+    // kext
+    // c_src/Karabiner-VirtualHIDDevice/dist/include
 
     println!("cargo:rerun-if-changed=c_src/c_src/driverkit.hpp");
     println!("cargo:rerun-if-changed=c_src/c_src/driverkit.cpp");
