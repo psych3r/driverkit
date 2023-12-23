@@ -325,10 +325,14 @@ extern "C" {
     }
 
     bool driver_activated() {
+#ifdef USE_KEXT
+        // FIXME: should we have anything here?
+#else
         auto service = IOServiceGetMatchingService(type_safe::get(pqrs::osx::iokit_mach_port::null),
                        IOServiceNameMatching("org_pqrs_Karabiner_DriverKit_VirtualHIDDeviceRoot"));
         if (!service) return false;
         IOObjectRelease(service);
+#endif
         return true;
     }
 

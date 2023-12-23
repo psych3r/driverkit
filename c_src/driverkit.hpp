@@ -10,8 +10,6 @@
 #include <filesystem> // Include this before virtual_hid_device_service.hpp to avoid compile error
 #include <IOKit/hid/IOHIDLib.h>
 #include <IOKit/hidsystem/IOHIDShared.h>
-#include "virtual_hid_device_driver.hpp"
-#include "virtual_hid_device_service.hpp"
 
 /* The name was changed from "Master" to "Main" in Apple SDK 12.0 (Monterey) */
 #if (MAC_OS_X_VERSION_MIN_REQUIRED < 120000) // Before macOS 12 Monterey
@@ -27,6 +25,9 @@
     pqrs::karabiner_virtual_hid_device::hid_report::apple_vendor_keyboard_input apple_keyboard;
     pqrs::karabiner_virtual_hid_device::hid_report::consumer_input consumer;
 #else
+#   include "virtual_hid_device_driver.hpp"
+#   include "virtual_hid_device_service.hpp"
+
     pqrs::karabiner::driverkit::virtual_hid_device_service::client* client;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::keyboard_input keyboard;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_top_case_input top_case;
@@ -67,7 +68,11 @@ void block_till_listener_init();
 void close_registered_devices();
 void notify_start_loop();
 int  init_sink();
-void exit_sink();
+#ifdef USE_KEXT
+    int exit_sink();
+#else
+    void exit_sink();
+#endif
 
 void print_iokit_error(const char* fname, int freturn = 0);
 void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef value);

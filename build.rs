@@ -16,6 +16,7 @@ fn main() {
             build.flag("-D");
             build.flag("USE_KEXT");
             build.include("c_src/Karabiner-VirtualHIDDevice/dist/include");
+            build.include("c_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include");
         } else {
             println!("macOS version {major}.{minor}.{patch}, using dext...");
             // dext
