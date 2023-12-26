@@ -25,8 +25,8 @@
     pqrs::karabiner_virtual_hid_device::hid_report::apple_vendor_keyboard_input apple_keyboard;
     pqrs::karabiner_virtual_hid_device::hid_report::consumer_input consumer;
 #else
-#   include "virtual_hid_device_driver.hpp"
-#   include "virtual_hid_device_service.hpp"
+    #include "virtual_hid_device_driver.hpp"
+    #include "virtual_hid_device_service.hpp"
 
     pqrs::karabiner::driverkit::virtual_hid_device_service::client* client;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::keyboard_input keyboard;
