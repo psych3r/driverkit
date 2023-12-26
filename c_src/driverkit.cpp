@@ -5,10 +5,63 @@ int send_key(T& keyboard, struct DKEvent* e) {
     if(e->value == 1) keyboard.keys.insert(e->code);
     else if(e->value == 0) keyboard.keys.erase(e->code);
     else return 1;
+    #ifdef USE_KEXT
+    return pqrs::karabiner_virtual_hid_device_methods::post_keyboard_input_report(connect, keyboard);
+    #else
     client->async_post_report(keyboard);
     return 0;
+    #endif
 }
 
+#ifdef USE_KEXT
+int init_sink() {
+    kern_return_t kr;
+    connect = IO_OBJECT_NULL;
+    service = IOServiceGetMatchingService(kIOMasterPortDefault,
+                                          IOServiceNameMatching(pqrs::karabiner_virtual_hid_device::get_virtual_hid_root_name()));
+    if (!service) {
+        print_iokit_error("IOServiceGetMatchingService");
+        return 1;
+    }
+    kr = IOServiceOpen(service, mach_task_self(), kIOHIDServerConnectType, &connect);
+    if (kr != KERN_SUCCESS) {
+        print_iokit_error("IOServiceOpen", kr);
+        return kr;
+    }
+    //std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+    //setuid(501);
+    {
+        pqrs::karabiner_virtual_hid_device::properties::keyboard_initialization properties;
+        kr = pqrs::karabiner_virtual_hid_device_methods::initialize_virtual_hid_keyboard(connect, properties);
+        if (kr != KERN_SUCCESS) {
+            print_iokit_error("initialize_virtual_hid_keyboard", kr);
+            return 1;
+        }
+        while (true) {
+            bool ready;
+            kr = pqrs::karabiner_virtual_hid_device_methods::is_virtual_hid_keyboard_ready(connect, ready);
+            if (kr != KERN_SUCCESS) {
+                print_iokit_error("is_virtual_hid_keyboard_ready", kr);
+                return kr;
+            } else {
+                if (ready)
+                    break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+    {
+        pqrs::karabiner_virtual_hid_device::properties::keyboard_initialization properties;
+        properties.country_code = 33;
+        kr = pqrs::karabiner_virtual_hid_device_methods::initialize_virtual_hid_keyboard(connect, properties);
+        if (kr != KERN_SUCCESS) {
+            print_iokit_error("initialize_virtual_hid_keyboard", kr);
+            return kr;
+        }
+    }
+    return 0;
+}
+#else
 int init_sink() {
     pqrs::dispatcher::extra::initialize_shared_dispatcher();
 
@@ -53,6 +106,7 @@ int init_sink() {
     client->async_start();
     return 0;
 }
+#endif
 
 void init_listener() {
     std::lock_guard<std::mutex> lock(mtx);
@@ -80,10 +134,37 @@ void notify_start_loop() {
     cv.notify_one();
 }
 
-void exit_sink() {
+#ifdef USE_KEXT
+int exit_sink() {
+    int retval = 0;
+    kern_return_t kr = pqrs::karabiner_virtual_hid_device_methods::reset_virtual_hid_keyboard(connect);
+    if (kr != KERN_SUCCESS) {
+        print_iokit_error("reset_virtual_hid_keyboard", kr);
+        retval = 1;
+    }
+    if (connect) {
+        kr = IOServiceClose(connect);
+        if(kr != KERN_SUCCESS) {
+            print_iokit_error("IOServiceClose", kr);
+            retval = 1;
+        }
+    }
+    if (service) {
+        kr = IOObjectRelease(service);
+        if(kr != KERN_SUCCESS) {
+            print_iokit_error("IOObjectRelease", kr);
+            retval = 1;
+        }
+    }
+    return retval;
+}
+#else
+int exit_sink() {
     free(client);
     pqrs::dispatcher::extra::terminate_shared_dispatcher();
+    return 0;
 }
+#endif
 
 void print_iokit_error(const char* fname, int freturn) {
     std::cerr << fname << " error: " << ( freturn ? mach_error_string(freturn) : "" ) << std::endl;
@@ -244,6 +325,12 @@ extern "C" {
         consume_kb_iter([](mach_port_t c) { std::cout << CFStringToStdString( get_property(c, kIOHIDProductKey) ) << std::endl; return true;});
     }
 
+    #ifdef USE_KEXT
+    bool driver_activated() {
+        // FIXME: should we have anything here?
+        return true;
+    }
+    #else
     bool driver_activated() {
         auto service = IOServiceGetMatchingService(type_safe::get(pqrs::osx::iokit_mach_port::null),
                        IOServiceNameMatching("org_pqrs_Karabiner_DriverKit_VirtualHIDDeviceRoot"));
@@ -251,6 +338,7 @@ extern "C" {
         IOObjectRelease(service);
         return true;
     }
+    #endif
 
     // Reads a new key event from the pipe, blocking until a new event is ready.
     int wait_key(struct DKEvent* e) { return read(fd[0], e, sizeof(struct DKEvent)) == sizeof(struct DKEvent); }
@@ -312,6 +400,19 @@ extern "C" {
      * represents a virtual keyboard).
      */
     int send_key(struct DKEvent* e) {
+        #ifdef USE_KEXT
+        auto usage_page = pqrs::karabiner_virtual_hid_device::usage_page(e->page);
+        if(usage_page == pqrs::karabiner_virtual_hid_device::usage_page::keyboard_or_keypad)
+            return send_key(keyboard, e);
+        else if(usage_page == pqrs::karabiner_virtual_hid_device::usage_page::apple_vendor_top_case)
+            return send_key(top_case, e);
+        else if(usage_page == pqrs::karabiner_virtual_hid_device::usage_page::apple_vendor_keyboard)
+            return send_key(apple_keyboard, e);
+        else if(usage_page == pqrs::karabiner_virtual_hid_device::usage_page::consumer)
+            return send_key(consumer, e);
+        else
+            return 1;
+        #else
         auto usage_page = pqrs::hid::usage_page::value_t(e->page);
         if(usage_page == pqrs::hid::usage_page::keyboard_or_keypad)
             return send_key(keyboard, e);
@@ -322,6 +423,7 @@ extern "C" {
         else if(usage_page == pqrs::hid::usage_page::consumer)
             return send_key(consumer, e);
         else return 1;
+        #endif
     }
 }
 

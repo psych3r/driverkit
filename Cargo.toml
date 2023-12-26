@@ -17,3 +17,4 @@ edition = "2021"
 
 [build-dependencies]
 cc = { version = "1.0", features = ["parallel"] }
+os_info = "3.7.0"
