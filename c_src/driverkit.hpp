@@ -68,11 +68,7 @@ void block_till_listener_init();
 void close_registered_devices();
 void notify_start_loop();
 int  init_sink();
-#ifdef USE_KEXT
-    int exit_sink();
-#else
-    void exit_sink();
-#endif
+int exit_sink();
 
 void print_iokit_error(const char* fname, int freturn = 0);
 void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef value);
