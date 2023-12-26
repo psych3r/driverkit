@@ -1,6 +1,6 @@
 [package]
 name = "karabiner-driverkit"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Psych3r <abdalrahman.mursi@gmail.com>"]
 description = "Minimal Karabiner-DriverKit-VirtualHIDDevice wrapper for kanata"
 keywords = ["library", "macos", "keyboard", "karabiner", "kanata"]
