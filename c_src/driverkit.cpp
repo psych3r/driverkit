@@ -134,36 +134,35 @@ void notify_start_loop() {
     cv.notify_one();
 }
 
+int exit_sink() {
 #ifdef USE_KEXT
-    int exit_sink() {
-        int retval = 0;
-        kern_return_t kr = pqrs::karabiner_virtual_hid_device_methods::reset_virtual_hid_keyboard(connect);
-        if (kr != KERN_SUCCESS) {
-            print_iokit_error("reset_virtual_hid_keyboard", kr);
+    int retval = 0;
+    kern_return_t kr = pqrs::karabiner_virtual_hid_device_methods::reset_virtual_hid_keyboard(connect);
+    if (kr != KERN_SUCCESS) {
+        print_iokit_error("reset_virtual_hid_keyboard", kr);
+        retval = 1;
+    }
+    if (connect) {
+        kr = IOServiceClose(connect);
+        if(kr != KERN_SUCCESS) {
+            print_iokit_error("IOServiceClose", kr);
             retval = 1;
         }
-        if (connect) {
-            kr = IOServiceClose(connect);
-            if(kr != KERN_SUCCESS) {
-                print_iokit_error("IOServiceClose", kr);
-                retval = 1;
-            }
-        }
-        if (service) {
-            kr = IOObjectRelease(service);
-            if(kr != KERN_SUCCESS) {
-                print_iokit_error("IOObjectRelease", kr);
-                retval = 1;
-            }
-        }
-        return retval;
     }
+    if (service) {
+        kr = IOObjectRelease(service);
+        if(kr != KERN_SUCCESS) {
+            print_iokit_error("IOObjectRelease", kr);
+            retval = 1;
+        }
+    }
+    return retval;
 #else
-    void exit_sink() {
-        free(client);
-        pqrs::dispatcher::extra::terminate_shared_dispatcher();
-    }
+    free(client);
+    pqrs::dispatcher::extra::terminate_shared_dispatcher();
+    return 0;
 #endif
+}
 
 void print_iokit_error(const char* fname, int freturn) {
     std::cerr << fname << " error: " << ( freturn ? mach_error_string(freturn) : "" ) << std::endl;
@@ -325,10 +324,14 @@ extern "C" {
     }
 
     bool driver_activated() {
+#ifdef USE_KEXT
+        // FIXME: should we have anything here?
+#else
         auto service = IOServiceGetMatchingService(type_safe::get(pqrs::osx::iokit_mach_port::null),
                        IOServiceNameMatching("org_pqrs_Karabiner_DriverKit_VirtualHIDDeviceRoot"));
         if (!service) return false;
         IOObjectRelease(service);
+#endif
         return true;
     }
 
