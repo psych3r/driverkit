@@ -244,7 +244,7 @@ bool consume_kb_iter(Func consume) {
     if(iter == IO_OBJECT_NULL) return false;
     bool result = false;
     for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
-        result = result || consume(curr);
+        result = consume(curr) || result;
     IOObjectRelease(iter);
     return result;
 }
