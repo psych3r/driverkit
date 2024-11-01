@@ -22,7 +22,7 @@ fn main() {
             build.include(
                 "c_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit",
             );
-            build.include("c_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include");
+            build.include("c_src/Karabiner-DriverKit-VirtualHIDDevice/src/Daemon/vendor/include");
         }
     }
 
