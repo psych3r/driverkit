@@ -70,7 +70,9 @@ int init_sink() {
 
     client->connected.connect([copy] {
         std::cout << "connected" << std::endl;
-        copy->async_virtual_hid_keyboard_initialize(pqrs::hid::country_code::us);
+        pqrs::karabiner::driverkit::virtual_hid_device_service::virtual_hid_keyboard_parameters parameters;
+        parameters.set_country_code(pqrs::hid::country_code::us);
+        copy->async_virtual_hid_keyboard_initialize(parameters);
     });
 
     client->closed.connect([] { std::cout << "closed" << std::endl; });
