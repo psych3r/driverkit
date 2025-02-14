@@ -24,6 +24,7 @@
     pqrs::karabiner_virtual_hid_device::hid_report::apple_vendor_top_case_input top_case;
     pqrs::karabiner_virtual_hid_device::hid_report::apple_vendor_keyboard_input apple_keyboard;
     pqrs::karabiner_virtual_hid_device::hid_report::consumer_input consumer;
+    pqrs::karabiner_virtual_hid_device::hid_report::generic_desktop_input generic_desktop;
 #else
     #include "virtual_hid_device_driver.hpp"
     #include "virtual_hid_device_service.hpp"
@@ -33,6 +34,7 @@
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_top_case_input top_case;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_keyboard_input apple_keyboard;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::consumer_input consumer;
+    pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::generic_desktop_input generic_desktop;
 #endif
 
 IONotificationPortRef notification_port = IONotificationPortCreate(kIOMainPortDefault);
