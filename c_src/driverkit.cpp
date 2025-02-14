@@ -261,7 +261,7 @@ CFStringRef get_property(mach_port_t item, const char* property) {
 
 template<typename... Args>
 void release_strings(Args... strings) {
-    (CFRelease(strings), ...);
+    ((strings ? CFRelease(strings) : void()), ...);
 }
 
 bool isSubstring(CFStringRef subString, CFStringRef mainString) {
