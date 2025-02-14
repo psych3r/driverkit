@@ -412,6 +412,8 @@ extern "C" {
             return send_key(apple_keyboard, e);
         else if(usage_page == pqrs::karabiner_virtual_hid_device::usage_page::consumer)
             return send_key(consumer, e);
+        else if(usage_page == pqrs::karabiner_virtual_hid_device::usage_page::generic_desktop)
+            return send_key(generic_desktop, e);
         else
             return 1;
         #else
@@ -424,6 +426,8 @@ extern "C" {
             return send_key(apple_keyboard, e);
         else if(usage_page == pqrs::hid::usage_page::consumer)
             return send_key(consumer, e);
+        else if(usage_page == pqrs::hid::usage_page::generic_desktop)
+            return send_key(generic_desktop, e);
         else return 1;
         #endif
     }
