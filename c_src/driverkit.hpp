@@ -99,6 +99,7 @@ extern "C" {
     void release();
 
     void list_keyboards();
+    void list_keyboards_with_ids();
     bool device_matches(const char* product);
     bool driver_activated();
     bool register_device(char* product);
