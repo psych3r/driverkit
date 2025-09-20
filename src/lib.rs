@@ -11,6 +11,7 @@ mod interface {
         pub fn send_key(e: *mut DKEvent) -> i32;
         pub fn wait_key(e: *mut DKEvent) -> i32;
         pub fn list_keyboards();
+        pub fn list_keyboards_with_ids();
         pub fn driver_activated() -> bool;
         pub fn device_matches(product: *mut c_char) -> bool;
         pub fn register_device(product: *mut c_char) -> bool;
@@ -64,6 +65,11 @@ pub fn release() {
 /// Lists the valid keyboard names to be registered with register_device()
 pub fn list_keyboards() {
     unsafe { interface::list_keyboards() }
+}
+
+/// Lists keyboard names with vendor/product IDs (tab-separated, decimal) and exits.
+pub fn list_keyboards_with_ids() {
+    unsafe { interface::list_keyboards_with_ids() }
 }
 
 /// Registers a device for IO control

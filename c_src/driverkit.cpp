@@ -327,6 +327,45 @@ extern "C" {
         consume_kb_iter([](mach_port_t c) { std::cout << CFStringToStdString( get_property(c, kIOHIDProductKey) ) << std::endl; return true;});
     }
 
+    // New: print name, vendor_id, product_id (tab-separated, decimal). Missing numbers -> 0
+    void list_keyboards_with_ids() {
+        consume_kb_iter([](mach_port_t c) {
+            CFStringRef name_ref = get_property(c, kIOHIDProductKey);
+            std::string name = CFStringToStdString(name_ref);
+            if (name_ref) CFRelease(name_ref);
+
+            // Fetch vendor & product as CFNumbers
+            CFTypeRef vendor_ref = IORegistryEntryCreateCFProperty(c, CFSTR(kIOHIDVendorIDKey), kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+            CFTypeRef product_ref = IORegistryEntryCreateCFProperty(c, CFSTR(kIOHIDProductIDKey), kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+
+            uint16_t vid = 0;
+            uint16_t pid = 0;
+
+            if (vendor_ref && CFGetTypeID(vendor_ref) == CFNumberGetTypeID()) {
+                int64_t v = 0;
+                if (CFNumberGetValue((CFNumberRef)vendor_ref, kCFNumberSInt64Type, &v)) {
+                    if (v >= 0 && v <= 0xFFFF) vid = static_cast<uint16_t>(v);
+                }
+            }
+
+            if (product_ref && CFGetTypeID(product_ref) == CFNumberGetTypeID()) {
+                int64_t p = 0;
+                if (CFNumberGetValue((CFNumberRef)product_ref, kCFNumberSInt64Type, &p)) {
+                    if (p >= 0 && p <= 0xFFFF) pid = static_cast<uint16_t>(p);
+                }
+            }
+
+            if (vendor_ref) CFRelease(vendor_ref);
+            if (product_ref) CFRelease(product_ref);
+
+            // Guard tabs in name to keep TSV parsing sane
+            for (char& ch : name) if (ch == '\t') ch = ' ';
+
+            std::cout << name << "\t" << vid << "\t" << pid << std::endl;
+            return true;
+        });
+    }
+
     #ifdef USE_KEXT
     bool driver_activated() {
         // FIXME: should we have anything here?
