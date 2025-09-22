@@ -304,7 +304,8 @@ bool register_device(char* product) {
     block_till_listener_init();
     bool opened = consume_kb_iter([product](mach_port_t c) { return open_device_if_match(product, c); });
     CFRunLoopAddSource(listener_loop, IONotificationPortGetRunLoopSource(notification_port), kCFRunLoopDefaultMode);
-    subscribe_to_notification(kIOMatchedNotification, product, matched_callback);
+    char *product_key = strndup(product, 255);
+    subscribe_to_notification(kIOMatchedNotification, product_key, matched_callback);
     subscribe_to_notification(kIOTerminatedNotification, NULL, terminated_callback);
     return opened;
 }
