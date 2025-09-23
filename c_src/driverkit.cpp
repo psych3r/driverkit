@@ -1,4 +1,5 @@
 #include "driverkit.hpp"
+#include <exception>
 
 template<typename T>
 int send_key(T& keyboard, struct DKEvent* e) {
@@ -63,50 +64,55 @@ int init_sink() {
 }
 #else
 int init_sink() {
-    pqrs::dispatcher::extra::initialize_shared_dispatcher();
+    try {
+        pqrs::dispatcher::extra::initialize_shared_dispatcher();
 
-    client = new pqrs::karabiner::driverkit::virtual_hid_device_service::client();
-    auto copy = client;
+        client = new pqrs::karabiner::driverkit::virtual_hid_device_service::client();
+        auto copy = client;
 
-    client->connected.connect([copy] {
-        std::cout << "connected" << std::endl;
-        pqrs::karabiner::driverkit::virtual_hid_device_service::virtual_hid_keyboard_parameters parameters;
-        parameters.set_country_code(pqrs::hid::country_code::us);
-        copy->async_virtual_hid_keyboard_initialize(parameters);
-    });
+        client->connected.connect([copy] {
+            std::cout << "connected" << std::endl;
+            pqrs::karabiner::driverkit::virtual_hid_device_service::virtual_hid_keyboard_parameters parameters;
+            parameters.set_country_code(pqrs::hid::country_code::us);
+            copy->async_virtual_hid_keyboard_initialize(parameters);
+        });
 
-    client->closed.connect([] { std::cout << "closed" << std::endl; });
+        client->closed.connect([] { std::cout << "closed" << std::endl; });
 
-    client->connect_failed.connect([](auto&& error_code) { std::cout << "connect_failed " << error_code << std::endl; });
+        client->connect_failed.connect([](auto&& error_code) { std::cout << "connect_failed " << error_code << std::endl; });
 
-    client->error_occurred.connect([](auto&& error_code) { std::cout << "error_occurred " << error_code << std::endl; });
+        client->error_occurred.connect([](auto&& error_code) { std::cout << "error_occurred " << error_code << std::endl; });
 
-    client->driver_activated.connect([](auto&& driver_activated) {
-        static std::optional<bool> previous_value;
-        if (previous_value != driver_activated) {
-            std::cout << "driver_activated " << driver_activated << std::endl;
-            previous_value = driver_activated;
-        }
-    });
+        client->driver_activated.connect([](auto&& driver_activated) {
+            static std::optional<bool> previous_value;
+            if (previous_value != driver_activated) {
+                std::cout << "driver activated: " << std::boolalpha  << driver_activated << std::endl;
+                previous_value = driver_activated;
+            }
+        });
 
-    client->driver_connected.connect([](auto&& driver_connected) {
-        static std::optional<bool> previous_value;
-        if (previous_value != driver_connected) {
-            std::cout << "driver_connected " << driver_connected << std::endl;
-            previous_value = driver_connected;
-        }
-    });
+        client->driver_connected.connect([](auto&& driver_connected) {
+            static std::optional<bool> previous_value;
+            if (previous_value != driver_connected) {
+                std::cout << "driver connected: " << driver_connected << std::endl;
+                previous_value = driver_connected;
+            }
+        });
 
-    client->driver_version_mismatched.connect([](auto&& driver_version_mismatched) {
-        static std::optional<bool> previous_value;
-        if (previous_value != driver_version_mismatched) {
-            std::cout << "driver_version_mismatched " << driver_version_mismatched << std::endl;
-            previous_value = driver_version_mismatched;
-        }
-    });
+        client->driver_version_mismatched.connect([](auto&& driver_version_mismatched) {
+            static std::optional<bool> previous_value;
+            if (previous_value != driver_version_mismatched) {
+                std::cout << "driver version matched: " << !driver_version_mismatched << std::endl;
+                previous_value = driver_version_mismatched;
+            }
+        });
 
-    client->async_start();
-    return 0;
+        client->async_start();
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "Exception in init_sink: " << e.what() << std::endl;
+        return 1;
+    }
 }
 #endif
 
@@ -120,6 +126,8 @@ void init_listener() {
 void monitoring_loop() {
     std::unique_lock<std::mutex> lock(mtx);
     cv.wait(lock, [] { return ready_to_loop; });
+    lock.unlock();
+
     CFRunLoopRun();
 }
 
@@ -150,6 +158,7 @@ int exit_sink() {
             print_iokit_error("IOServiceClose", kr);
             retval = 1;
         }
+        connect = IO_OBJECT_NULL;
     }
     if (service) {
         kr = IOObjectRelease(service);
@@ -157,12 +166,16 @@ int exit_sink() {
             print_iokit_error("IOObjectRelease", kr);
             retval = 1;
         }
+        service = IO_OBJECT_NULL;
     }
     return retval;
 }
 #else
 int exit_sink() {
-    free(client);
+    if (client) {
+        delete client;
+        client = nullptr;
+    }
     pqrs::dispatcher::extra::terminate_shared_dispatcher();
     return 0;
 }
@@ -252,6 +265,7 @@ bool consume_kb_iter(Func consume) {
 }
 
 CFStringRef from_cstr( const char* str) {
+    if (!str) return nullptr;
     return CFStringCreateWithCString(kCFAllocatorDefault, str, CFStringGetSystemEncoding());
 }
 
@@ -265,6 +279,7 @@ void release_strings(Args... strings) {
 }
 
 bool isSubstring(CFStringRef subString, CFStringRef mainString) {
+    if (!subString || !mainString) return false;
     return CFStringFind(mainString, subString, kCFCompareCaseInsensitive).location != kCFNotFound;
 }
 
@@ -276,13 +291,13 @@ bool open_device_if_match(const char* product, mach_port_t device) {
     CFStringRef karabiner   = from_cstr("Karabiner"); //Karabiner DriverKit VirtualHIDKeyboard 1.7.0
     CFStringRef device_key  = get_property(device, kIOHIDProductKey);
 
-    if( !device_key || isSubstring(karabiner, device_key) ) {
+    if(!device_key || isSubstring(karabiner, device_key) ) {
         release_strings(karabiner, device_key, product_key);
         return false;
     }
 
     bool opened = false;
-    if( !product || (CFStringCompare(device_key, product_key, 0) == kCFCompareEqualTo))
+    if(!product || (CFStringCompare(device_key, product_key, 0) == kCFCompareEqualTo))
         opened = open_device(device);
 
     release_strings(karabiner, device_key, product_key);
@@ -304,7 +319,15 @@ bool register_device(char* product) {
     block_till_listener_init();
     bool opened = consume_kb_iter([product](mach_port_t c) { return open_device_if_match(product, c); });
     CFRunLoopAddSource(listener_loop, IONotificationPortGetRunLoopSource(notification_port), kCFRunLoopDefaultMode);
-    subscribe_to_notification(kIOMatchedNotification, product, matched_callback);
+
+    char* product_copy = nullptr;
+    if (product) {
+        product_copy = strdup(product);
+        std::lock_guard<std::mutex> lock(allocated_products_mutex);
+        allocated_products.emplace_back(product_copy, free);
+    }
+
+    subscribe_to_notification(kIOMatchedNotification, product_copy, matched_callback);
     subscribe_to_notification(kIOTerminatedNotification, NULL, terminated_callback);
     return opened;
 }
@@ -319,6 +342,11 @@ std::string CFStringToStdString(CFStringRef cfString) {
         return utf8String;
     }
     return std::string();
+}
+
+void cleanup_allocated_products() {
+    std::lock_guard<std::mutex> lock(allocated_products_mutex);
+    allocated_products.clear();
 }
 
 extern "C" {
@@ -432,6 +460,7 @@ extern "C" {
         if(thread.joinable()) { CFRunLoopStop(listener_loop); thread.join(); }
         keyboard.keys.clear();
         close(fd[0]); close(fd[1]);
+        cleanup_allocated_products();
         exit_sink();
     }
 
@@ -474,14 +503,15 @@ extern "C" {
 
 // main function is just for testing
 // build as binary command:
-// g++ c_src/driverkit.cpp -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include -std=c++2a -framework IOKit -framework CoreFoundation -o driverkit
+// g++ c_src/driverkit.cpp -DBUILD_AS_BINARY -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/vendor/vendor/include -std=c++2a -framework IOKit -framework CoreFoundation -o driverkit
 #ifdef BUILD_AS_BINARY
 int main() {
-    list_keyboards();
+    // list_keyboards();
+    list_keyboards_with_ids();
     std::cout << "test device_matches:" << std::boolalpha << std::endl <<
-              "device_matches(NULL): " << device_matches(NULL) << std::endl <<
-              "device_matches(appl): " << device_matches("Apple Internal Keyboard / Trackpad") << std::endl <<
-              "device_matches(____): " << device_matches("nano") << std::noboolalpha << std::endl;
+                 "device_matches(NULL): " << device_matches(NULL) << std::endl <<
+                 "device_matches(appl): " << device_matches("Apple Internal Keyboard / Trackpad") << std::endl <<
+                 "device_matches(____): " << device_matches("nano") << std::noboolalpha << std::endl;
     // std::cout << "test register_device:" << std::boolalpha << std::endl <<
     //     "register_device(NULL): " << register_device(NULL) << std::endl <<
     //     "register_device(appl): " << register_device("Apple Internal Keyboard / Trackpad") << std::endl <<
@@ -491,6 +521,8 @@ int main() {
     //register_device(NULL);
     //register_device(keeb);
     notify_start_loop();
-    thread.join();
+    if (thread.joinable()) thread.join();
+    release();
+    return 0;
 }
 #endif

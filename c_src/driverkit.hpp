@@ -50,6 +50,9 @@ bool ready_to_loop = false;
 
 using callback_type = void(*)(void*, io_iterator_t);
 
+static std::vector<std::unique_ptr<char, void(*)(void*)>> allocated_products;
+static std::mutex allocated_products_mutex;
+
 /*
  * Key event information that's shared between C++ and Rust
  * value: represents key up or key down
@@ -69,6 +72,7 @@ void fire_thread_once();
 void block_till_listener_init();
 void close_registered_devices();
 void notify_start_loop();
+void cleanup_allocated_products();
 int  init_sink();
 int exit_sink();
 
