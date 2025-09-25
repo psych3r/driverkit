@@ -458,6 +458,8 @@ extern "C" {
      */
     void release() {
         if(thread.joinable()) { CFRunLoopStop(listener_loop); thread.join(); }
+        listener_initialized = false;
+        ready_to_loop = false;
         keyboard.keys.clear();
         close(fd[0]); close(fd[1]);
         cleanup_allocated_products();
