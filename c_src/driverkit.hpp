@@ -3,7 +3,6 @@
 #include <errno.h>
 #include <thread>
 #include <mutex>
-#include <condition_variable>
 #include <iostream>
 #include <mach/mach_error.h>
 #include <AvailabilityMacros.h>
@@ -28,7 +27,6 @@
 #else
     #include "virtual_hid_device_driver.hpp"
     #include "virtual_hid_device_service.hpp"
-
     pqrs::karabiner::driverkit::virtual_hid_device_service::client* client;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::keyboard_input keyboard;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_top_case_input top_case;
@@ -38,19 +36,17 @@
 #endif
 
 IONotificationPortRef notification_port = IONotificationPortCreate(kIOMainPortDefault);
-std::thread thread;
+std::thread listener_thread;
 CFRunLoopRef listener_loop;
 std::map<io_service_t, IOHIDDeviceRef> source_devices;
 int fd[2];
 CFMutableDictionaryRef matching_dictionary = NULL;
-std::mutex mtx;
-std::condition_variable cv;
-bool listener_initialized = false;
-bool ready_to_loop = false;
+
+void register_devices_with_listener_loop();
 
 using callback_type = void(*)(void*, io_iterator_t);
 
-static std::vector<std::unique_ptr<char, void(*)(void*)>> allocated_products;
+static std::vector<std::unique_ptr<char, void(*)(void*) >> allocated_products;
 static std::mutex allocated_products_mutex;
 
 /*
@@ -65,18 +61,12 @@ struct DKEvent {
     uint32_t code;
 };
 
-void init_listener();
-void monitoring_loop();
-void start_monitoring();
-void fire_thread_once();
-void block_till_listener_init();
+void fire_listener_thread();
 void close_registered_devices();
-void notify_start_loop();
 void cleanup_allocated_products();
 int  init_sink();
-int exit_sink();
+int  exit_sink();
 
-void print_iokit_error(const char* fname, int freturn = 0);
 void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef value);
 void matched_callback(void* context, io_iterator_t iter);
 void terminated_callback(void* context, io_iterator_t iter);
@@ -90,11 +80,31 @@ io_iterator_t get_keyboards_iterator();
 std::string CFStringToStdString(CFStringRef cfString);
 template <typename Func>
 bool consume_kb_iter(Func consume);
+
+// Helper functions...
+inline void print_iokit_error(const char* fname, int freturn) {
+    std::cerr << fname << " error: " << ( freturn ? mach_error_string(freturn) : "" ) << std::endl;
+}
+
+inline CFStringRef from_cstr( const char* str) {
+    if (!str) return nullptr;
+    return CFStringCreateWithCString(kCFAllocatorDefault, str, CFStringGetSystemEncoding());
+}
+
+inline CFStringRef get_property(mach_port_t item, const char* property) {
+    return (CFStringRef) IORegistryEntryCreateCFProperty(item, from_cstr(property), kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+}
+
 template<typename... Args>
-void release_strings(Args... strings);
-CFStringRef from_cstr( const char* str);
-CFStringRef get_property(mach_port_t item, const char* property);
-bool isSubstring(CFStringRef subString, CFStringRef mainString);
+inline void release_strings(Args... strings) {
+    ((strings ? CFRelease(strings) : void()), ...);
+}
+
+inline bool isSubstring(CFStringRef subString, CFStringRef mainString) {
+    if (!subString || !mainString) return false;
+    return CFStringFind(mainString, subString, kCFCompareCaseInsensitive).location != kCFNotFound;
+}
+
 
 extern "C" {
     int grab();

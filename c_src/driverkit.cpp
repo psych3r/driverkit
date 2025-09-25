@@ -15,6 +15,7 @@ int send_key(T& keyboard, struct DKEvent* e) {
 }
 
 #ifdef USE_KEXT
+
 int init_sink() {
     kern_return_t kr;
     connect = IO_OBJECT_NULL;
@@ -29,8 +30,6 @@ int init_sink() {
         print_iokit_error("IOServiceOpen", kr);
         return kr;
     }
-    //std::this_thread::sleep_for(std::chrono::milliseconds(10000));
-    //setuid(501);
     {
         pqrs::karabiner_virtual_hid_device::properties::keyboard_initialization properties;
         kr = pqrs::karabiner_virtual_hid_device_methods::initialize_virtual_hid_keyboard(connect, properties);
@@ -62,7 +61,35 @@ int init_sink() {
     }
     return 0;
 }
+
+int exit_sink() {
+    int retval = 0;
+    kern_return_t kr = pqrs::karabiner_virtual_hid_device_methods::reset_virtual_hid_keyboard(connect);
+    if (kr != KERN_SUCCESS) {
+        print_iokit_error("reset_virtual_hid_keyboard", kr);
+        retval = 1;
+    }
+    if (connect) {
+        kr = IOServiceClose(connect);
+        if(kr != KERN_SUCCESS) {
+            print_iokit_error("IOServiceClose", kr);
+            retval = 1;
+        }
+        connect = IO_OBJECT_NULL;
+    }
+    if (service) {
+        kr = IOObjectRelease(service);
+        if(kr != KERN_SUCCESS) {
+            print_iokit_error("IOObjectRelease", kr);
+            retval = 1;
+        }
+        service = IO_OBJECT_NULL;
+    }
+    return retval;
+}
+
 #else
+
 int init_sink() {
     try {
         pqrs::dispatcher::extra::initialize_shared_dispatcher();
@@ -114,63 +141,7 @@ int init_sink() {
         return 1;
     }
 }
-#endif
 
-void init_listener() {
-    std::lock_guard<std::mutex> lock(mtx);
-    listener_loop = CFRunLoopGetCurrent();
-    listener_initialized = true;
-    cv.notify_one();
-}
-
-void monitoring_loop() {
-    std::unique_lock<std::mutex> lock(mtx);
-    cv.wait(lock, [] { return ready_to_loop; });
-    lock.unlock();
-
-    CFRunLoopRun();
-}
-
-void fire_thread_once() { if (!thread.joinable()) thread = std::thread{start_monitoring}; }
-
-void block_till_listener_init() {
-    std::unique_lock<std::mutex> lock(mtx);
-    cv.wait(lock, [] { return listener_initialized; });
-}
-
-void notify_start_loop() {
-    std::lock_guard<std::mutex> lock(mtx);
-    ready_to_loop = true;
-    cv.notify_one();
-}
-
-#ifdef USE_KEXT
-int exit_sink() {
-    int retval = 0;
-    kern_return_t kr = pqrs::karabiner_virtual_hid_device_methods::reset_virtual_hid_keyboard(connect);
-    if (kr != KERN_SUCCESS) {
-        print_iokit_error("reset_virtual_hid_keyboard", kr);
-        retval = 1;
-    }
-    if (connect) {
-        kr = IOServiceClose(connect);
-        if(kr != KERN_SUCCESS) {
-            print_iokit_error("IOServiceClose", kr);
-            retval = 1;
-        }
-        connect = IO_OBJECT_NULL;
-    }
-    if (service) {
-        kr = IOObjectRelease(service);
-        if(kr != KERN_SUCCESS) {
-            print_iokit_error("IOObjectRelease", kr);
-            retval = 1;
-        }
-        service = IO_OBJECT_NULL;
-    }
-    return retval;
-}
-#else
 int exit_sink() {
     if (client) {
         delete client;
@@ -179,10 +150,18 @@ int exit_sink() {
     pqrs::dispatcher::extra::terminate_shared_dispatcher();
     return 0;
 }
+
 #endif
 
-void print_iokit_error(const char* fname, int freturn) {
-    std::cerr << fname << " error: " << ( freturn ? mach_error_string(freturn) : "" ) << std::endl;
+void fire_listener_thread() {
+    if (!listener_thread.joinable())
+        listener_thread = std::thread{
+        [&]() {
+            listener_loop = CFRunLoopGetCurrent();
+            register_devices_with_listener_loop();
+            CFRunLoopAddSource(listener_loop, IONotificationPortGetRunLoopSource(notification_port), kCFRunLoopDefaultMode);
+            CFRunLoopRun();
+        } };
 }
 
 void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef value) {
@@ -207,12 +186,6 @@ void terminated_callback(void* context, io_iterator_t iter) {
         source_devices.erase(curr);
 }
 
-void start_monitoring() {
-    init_listener();
-    monitoring_loop();
-    close_registered_devices();
-}
-
 void close_registered_devices() {
     for(std::pair<const io_service_t, IOHIDDeviceRef> p : source_devices) {
         kern_return_t kr = IOHIDDeviceClose(p.second, kIOHIDOptionsTypeSeizeDevice);
@@ -229,8 +202,19 @@ bool open_device(mach_port_t keeb) {
         print_iokit_error("IOHIDDeviceOpen", kr);
         return false;
     }
-    IOHIDDeviceScheduleWithRunLoop(dev, listener_loop, kCFRunLoopDefaultMode);
+    // Scheduling must be done in the listener thread's run loop
+    // IOHIDDeviceScheduleWithRunLoop(dev, listener_loop, kCFRunLoopDefaultMode);
+    // TODO:
+    // See if it's better for register_devices() to just fill source_devices
+    // And then the listener_thread has to open and schedule them all.
+    // This would be instead of openening the devices in the main thread,
+    // and then scheduling them in the listener thread via register_devices_with_listener_loop().
     return true;
+}
+
+void register_devices_with_listener_loop() {
+    for (std::pair<const io_service_t, IOHIDDeviceRef> p : source_devices)
+        IOHIDDeviceScheduleWithRunLoop(p.second, listener_loop, kCFRunLoopDefaultMode);
 }
 
 void init_keyboards_dictionary() {
@@ -264,27 +248,8 @@ bool consume_kb_iter(Func consume) {
     return result;
 }
 
-CFStringRef from_cstr( const char* str) {
-    if (!str) return nullptr;
-    return CFStringCreateWithCString(kCFAllocatorDefault, str, CFStringGetSystemEncoding());
-}
-
-CFStringRef get_property(mach_port_t item, const char* property) {
-    return (CFStringRef) IORegistryEntryCreateCFProperty(item, from_cstr(property), kCFAllocatorDefault, kIOHIDOptionsTypeNone);
-}
-
-template<typename... Args>
-void release_strings(Args... strings) {
-    ((strings ? CFRelease(strings) : void()), ...);
-}
-
-bool isSubstring(CFStringRef subString, CFStringRef mainString) {
-    if (!subString || !mainString) return false;
-    return CFStringFind(mainString, subString, kCFCompareCaseInsensitive).location != kCFNotFound;
-}
-
 /*  * device is karabiner => return, don't open it no matter what
-    * product is null     => open the device
+    * product is null     => open all devices
     * product specified   => open the device if it matches product (device key requested) */
 bool open_device_if_match(const char* product, mach_port_t device) {
     CFStringRef product_key = product ? from_cstr(product) : from_cstr("");
@@ -315,18 +280,17 @@ void subscribe_to_notification(const char* notification_type, void* cb_arg, call
 }
 
 bool register_device(char* product) {
-    fire_thread_once();
-    block_till_listener_init();
     bool opened = consume_kb_iter([product](mach_port_t c) { return open_device_if_match(product, c); });
-    CFRunLoopAddSource(listener_loop, IONotificationPortGetRunLoopSource(notification_port), kCFRunLoopDefaultMode);
-
+    if (!opened) {
+        std::cout << "No matching device found: " << (product ? product : "null") << std::endl;
+        return false;
+    }
     char* product_copy = nullptr;
     if (product) {
         product_copy = strdup(product);
         std::lock_guard<std::mutex> lock(allocated_products_mutex);
         allocated_products.emplace_back(product_copy, free);
     }
-
     subscribe_to_notification(kIOMatchedNotification, product_copy, matched_callback);
     subscribe_to_notification(kIOTerminatedNotification, NULL, terminated_callback);
     return opened;
@@ -443,12 +407,12 @@ extern "C" {
      * back to the OS.
      */
     int grab() {
-        if (!thread.joinable()) {
+        if (!source_devices.size() ) {
             std::cout << "At least one device has to be registered via register_device()" << std::endl;
             return 1;
         }
         if (pipe(fd) == -1) { std::cerr << "pipe error: " << errno << std::endl; return errno; }
-        notify_start_loop();
+        fire_listener_thread();
         return init_sink();
     }
 
@@ -457,9 +421,7 @@ extern "C" {
      * key events to the OS.
      */
     void release() {
-        if(thread.joinable()) { CFRunLoopStop(listener_loop); thread.join(); }
-        listener_initialized = false;
-        ready_to_loop = false;
+        if(listener_thread.joinable()) { CFRunLoopStop(listener_loop); listener_thread.join(); }
         keyboard.keys.clear();
         close(fd[0]); close(fd[1]);
         cleanup_allocated_products();
@@ -505,25 +467,21 @@ extern "C" {
 
 // main function is just for testing
 // build as binary command:
-// g++ c_src/driverkit.cpp -DBUILD_AS_BINARY -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/vendor/vendor/include -std=c++2a -framework IOKit -framework CoreFoundation -o driverkit
+// g++ c_src/driverkit.cpp -DBUILD_AS_BINARY -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/vendor/vendor/include -std=c++2a -framework IOKit -framework CoreFoundation -o driverkit -g -O0
 #ifdef BUILD_AS_BINARY
 int main() {
-    // list_keyboards();
+    list_keyboards();
     list_keyboards_with_ids();
     std::cout << "test device_matches:" << std::boolalpha << std::endl <<
                  "device_matches(NULL): " << device_matches(NULL) << std::endl <<
                  "device_matches(appl): " << device_matches("Apple Internal Keyboard / Trackpad") << std::endl <<
                  "device_matches(____): " << device_matches("nano") << std::noboolalpha << std::endl;
-    // std::cout << "test register_device:" << std::boolalpha << std::endl <<
-    //     "register_device(NULL): " << register_device(NULL) << std::endl <<
-    //     "register_device(appl): " << register_device("Apple Internal Keyboard / Trackpad") << std::endl <<
-    //     "register_device(____): " << register_device("nano") << std::noboolalpha << std::endl;
-    // const char* keeb = "Apple Internal Keyboard / Trackpad";
-    register_device("kbd67mkiirgb v3");
-    //register_device(NULL);
-    //register_device(keeb);
-    notify_start_loop();
-    if (thread.joinable()) thread.join();
+    char* keeb = "Apple Internal Keyboard / Trackpad";
+    register_device(keeb);
+    std::cout << "registered device: " << keeb << std::endl;
+    grab();
+    std::cout << "init sink " << std::endl;
+    listener_thread.join();
     release();
     return 0;
 }
