@@ -158,8 +158,7 @@ void fire_listener_thread() {
         listener_thread = std::thread{
         [&]() {
             listener_loop = CFRunLoopGetCurrent();
-            register_devices_with_listener_loop();
-            CFRunLoopAddSource(listener_loop, IONotificationPortGetRunLoopSource(notification_port), kCFRunLoopDefaultMode);
+            capture_registered_devices();
             CFRunLoopRun();
         } };
 }
@@ -173,48 +172,23 @@ void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef 
     write(fd[1], &e, sizeof(struct DKEvent));
 }
 
-void matched_callback(void* context, io_iterator_t iter) {
-    // std::cout << "match cb called" << std::endl;
-    char* product = (char*)context;
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
-        open_device_if_match(product, curr);
-}
-
-void terminated_callback(void* context, io_iterator_t iter) {
-    // std::cout << "term cb called" << std::endl;
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
-        source_devices.erase(curr);
+void device_connected_callback(void* context, io_iterator_t iter) {
+    uint64_t device_hash = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(context));
+    for (mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {
+        uint64_t curr_hash = hash_device(curr);
+        if ( curr_hash == device_hash )
+            capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, curr));
+        IOObjectRelease(curr);
+    }
 }
 
 void close_registered_devices() {
-    for(std::pair<const io_service_t, IOHIDDeviceRef> p : source_devices) {
-        kern_return_t kr = IOHIDDeviceClose(p.second, kIOHIDOptionsTypeSeizeDevice);
+    for(auto hash : registered_devices_hashes) {
+        IOHIDDeviceRef device_ref = get_device_by_hash(hash);
+        kern_return_t kr = IOHIDDeviceClose(device_ref, kIOHIDOptionsTypeSeizeDevice);
         if(kr != KERN_SUCCESS) { print_iokit_error("IOHIDDeviceClose", kr); return; }
+        CFRelease(device_ref);
     }
-}
-
-bool open_device(mach_port_t keeb) {
-    IOHIDDeviceRef dev = IOHIDDeviceCreate(kCFAllocatorDefault, keeb);
-    source_devices[keeb] = dev;
-    IOHIDDeviceRegisterInputValueCallback(dev, input_callback, NULL);
-    kern_return_t kr = IOHIDDeviceOpen(dev, kIOHIDOptionsTypeSeizeDevice);
-    if(kr != kIOReturnSuccess) {
-        print_iokit_error("IOHIDDeviceOpen", kr);
-        return false;
-    }
-    // Scheduling must be done in the listener thread's run loop
-    // IOHIDDeviceScheduleWithRunLoop(dev, listener_loop, kCFRunLoopDefaultMode);
-    // TODO:
-    // See if it's better for register_devices() to just fill source_devices
-    // And then the listener_thread has to open and schedule them all.
-    // This would be instead of openening the devices in the main thread,
-    // and then scheduling them in the listener thread via register_devices_with_listener_loop().
-    return true;
-}
-
-void register_devices_with_listener_loop() {
-    for (std::pair<const io_service_t, IOHIDDeviceRef> p : source_devices)
-        IOHIDDeviceScheduleWithRunLoop(p.second, listener_loop, kCFRunLoopDefaultMode);
 }
 
 void init_keyboards_dictionary() {
@@ -237,7 +211,7 @@ io_iterator_t get_keyboards_iterator() {
 }
 
 template <typename Func>
-bool consume_kb_iter(Func consume) {
+bool consume_devices(Func consume) {
     init_keyboards_dictionary();
     io_iterator_t iter = get_keyboards_iterator();
     if(iter == IO_OBJECT_NULL) return false;
@@ -248,112 +222,100 @@ bool consume_kb_iter(Func consume) {
     return result;
 }
 
-/*  * device is karabiner => return, don't open it no matter what
-    * product is null     => open all devices
-    * product specified   => open the device if it matches product (device key requested) */
-bool open_device_if_match(const char* product, mach_port_t device) {
-    CFStringRef product_key = product ? from_cstr(product) : from_cstr("");
-    CFStringRef karabiner   = from_cstr("Karabiner"); //Karabiner DriverKit VirtualHIDKeyboard 1.7.0
-    CFStringRef device_key  = get_property(device, kIOHIDProductKey);
-
-    if(!device_key || isSubstring(karabiner, device_key) ) {
-        release_strings(karabiner, device_key, product_key);
-        return false;
-    }
-
-    bool opened = false;
-    if(!product || (CFStringCompare(device_key, product_key, 0) == kCFCompareEqualTo))
-        opened = open_device(device);
-
-    release_strings(karabiner, device_key, product_key);
-    return opened;
-}
-
-using callback_type = void(*)(void*, io_iterator_t);
 void subscribe_to_notification(const char* notification_type, void* cb_arg, callback_type callback) {
     io_iterator_t iter = IO_OBJECT_NULL;
     CFRetain(matching_dictionary);
     kern_return_t kr = IOServiceAddMatchingNotification(notification_port, notification_type,
                        matching_dictionary, callback, cb_arg, &iter);
     if (kr != KERN_SUCCESS) { print_iokit_error(notification_type, kr); return; }
-    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {} // mystery, doesn't work without this line!!!
+    for (io_object_t obj = IOIteratorNext(iter); obj; obj = IOIteratorNext(iter))
+        IOObjectRelease(obj);
 }
 
-bool register_device(char* product) {
-    bool opened = consume_kb_iter([product](mach_port_t c) { return open_device_if_match(product, c); });
-    if (!opened) {
-        std::cout << "No matching device found: " << (product ? product : "null") << std::endl;
+bool capture_device(IOHIDDeviceRef device_ref) {
+    kern_return_t kr = IOHIDDeviceOpen(device_ref, kIOHIDOptionsTypeSeizeDevice);
+    if(kr != kIOReturnSuccess) {
+        print_iokit_error("IOHIDDeviceOpen", kr, CFStringToStdString(get_device_name(device_ref)));
         return false;
     }
-    char* product_copy = nullptr;
-    if (product) {
-        product_copy = strdup(product);
-        std::lock_guard<std::mutex> lock(allocated_products_mutex);
-        allocated_products.emplace_back(product_copy, free);
-    }
-    subscribe_to_notification(kIOMatchedNotification, product_copy, matched_callback);
-    subscribe_to_notification(kIOTerminatedNotification, NULL, terminated_callback);
-    return opened;
+    IOHIDDeviceRegisterInputValueCallback(device_ref, input_callback, NULL);
+    IOHIDDeviceScheduleWithRunLoop(device_ref, listener_loop, kCFRunLoopDefaultMode);
+    return true;
 }
 
-std::string CFStringToStdString(CFStringRef cfString) {
-    if (cfString == nullptr)  return std::string();
-    CFIndex length  = CFStringGetLength(cfString);
-    CFIndex maxSize = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
-    std::string utf8String(maxSize, '\0');
-    if (CFStringGetCString(cfString, &utf8String[0], maxSize, kCFStringEncodingUTF8)) {
-        utf8String.resize(strlen( utf8String.c_str()));
-        return utf8String;
-    }
-    return std::string();
+bool capture_registered_devices() {
+    // Register the notification port to the run loop, essential for receiving re-connect events so we can re-capture devices
+    CFRunLoopAddSource(listener_loop, IONotificationPortGetRunLoopSource(notification_port), kCFRunLoopDefaultMode);
+    return consume_devices([](mach_port_t c) {
+        uint64_t device_hash = hash_device(c);
+        if ( registered_devices_hashes.find(device_hash) != registered_devices_hashes.end() ) {
+            bool captured = capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, c));
+            if ( captured ) {
+                void* dev_hash = reinterpret_cast<void*>(static_cast<uintptr_t>(device_hash));
+                subscribe_to_notification(kIOMatchedNotification, dev_hash, device_connected_callback);
+            }
+            return captured;
+        } else return false;
+    });
 }
 
-void cleanup_allocated_products() {
-    std::lock_guard<std::mutex> lock(allocated_products_mutex);
-    allocated_products.clear();
+IOHIDDeviceRef get_device_by_hash(uint64_t device_hash) {
+    init_keyboards_dictionary();
+    io_iterator_t iter = get_keyboards_iterator();
+    if(iter == IO_OBJECT_NULL) return nullptr;
+    for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter))
+        if ( hash_device(curr) == device_hash )
+            return IOHIDDeviceCreate(kCFAllocatorDefault, curr);
+    IOObjectRelease(iter);
+    return nullptr;
+}
+
+uint64_t hash_device(mach_port_t device) {
+    std::string product_key = CFStringToStdString(get_property(device, kIOHIDProductKey));
+    uint32_t vendor_id      = get_number_property(device, kIOHIDVendorIDKey);
+    uint32_t product_id     = get_number_property(device, kIOHIDProductIDKey);
+    std::string key         = std::to_string(vendor_id) + ":" + std::to_string(product_id) + ":" + product_key;
+    return std::hash<std::string> {}(key);
 }
 
 extern "C" {
 
-    void list_keyboards() { // CFStringGetCStringPtr(cfString, kCFStringEncodingUTF8)
-        consume_kb_iter([](mach_port_t c) { std::cout << CFStringToStdString( get_property(c, kIOHIDProductKey) ) << std::endl; return true;});
+    /*
+     * current device is karabiner => return, shouldn't be registered nor captured, avoid at all costs!!!
+     * product_kye is null         => register all devices
+     * product_key specified       => register the device that matches product_key  */
+    bool register_device(const char* product_key) {
+        return consume_devices([product_key](mach_port_t current_device) {
+            CFStringRef product_key_cfstring = product_key ? from_cstr(product_key) : from_cstr("");
+            CFStringRef karabiner            = from_cstr("Karabiner"); //Karabiner DriverKit VirtualHIDKeyboard 1.7.0
+            CFStringRef current_product_key  = get_property(current_device, kIOHIDProductKey);
+            // Don't open karabiner devices or devices without a name
+            if(!current_product_key || isSubstring(karabiner, current_product_key) ) {
+                release_strings(karabiner, current_product_key, product_key_cfstring);
+                return false;
+            }
+            bool registered = false;
+            if(!product_key || (CFStringCompare(current_product_key, product_key_cfstring, 0) == kCFCompareEqualTo)) {
+                registered_devices_hashes.insert(hash_device(current_device));
+                registered = true;
+            }
+            release_strings(karabiner, current_product_key, product_key_cfstring);
+            return registered;
+        });
     }
 
-    // New: print name, vendor_id, product_id (tab-separated, decimal). Missing numbers -> 0
+    void list_keyboards() { // CFStringGetCStringPtr(cfString, kCFStringEncodingUTF8)
+        consume_devices([](mach_port_t c) { std::cout << CFStringToStdString( get_property(c, kIOHIDProductKey) ) << std::endl; return true;});
+    }
+
     void list_keyboards_with_ids() {
-        consume_kb_iter([](mach_port_t c) {
-            CFStringRef name_ref = get_property(c, kIOHIDProductKey);
-            std::string name = CFStringToStdString(name_ref);
-            if (name_ref) CFRelease(name_ref);
-
-            // Fetch vendor & product as CFNumbers
-            CFTypeRef vendor_ref = IORegistryEntryCreateCFProperty(c, CFSTR(kIOHIDVendorIDKey), kCFAllocatorDefault, kIOHIDOptionsTypeNone);
-            CFTypeRef product_ref = IORegistryEntryCreateCFProperty(c, CFSTR(kIOHIDProductIDKey), kCFAllocatorDefault, kIOHIDOptionsTypeNone);
-
-            uint16_t vid = 0;
-            uint16_t pid = 0;
-
-            if (vendor_ref && CFGetTypeID(vendor_ref) == CFNumberGetTypeID()) {
-                int64_t v = 0;
-                if (CFNumberGetValue((CFNumberRef)vendor_ref, kCFNumberSInt64Type, &v)) {
-                    if (v >= 0 && v <= 0xFFFF) vid = static_cast<uint16_t>(v);
-                }
-            }
-
-            if (product_ref && CFGetTypeID(product_ref) == CFNumberGetTypeID()) {
-                int64_t p = 0;
-                if (CFNumberGetValue((CFNumberRef)product_ref, kCFNumberSInt64Type, &p)) {
-                    if (p >= 0 && p <= 0xFFFF) pid = static_cast<uint16_t>(p);
-                }
-            }
-
-            if (vendor_ref) CFRelease(vendor_ref);
-            if (product_ref) CFRelease(product_ref);
-
-            // Guard tabs in name to keep TSV parsing sane
-            for (char& ch : name) if (ch == '\t') ch = ' ';
-
-            std::cout << name << "\t" << vid << "\t" << pid << std::endl;
+        consume_devices([](mach_port_t current_device) {
+            // TODO: filter out duplicates (same vendor_id, product_id, name)
+            // Also, print as decimal instad of hex?
+            std::printf("vendor id: 0x%04X\t product id: 0x%04X\t Product key (name): %s\n",
+                        get_number_property(current_device, kIOHIDVendorIDKey),
+                        get_number_property(current_device, kIOHIDProductIDKey),
+                        CFStringToStdString(get_property(current_device, kIOHIDProductKey)).c_str());
             return true;
         });
     }
@@ -407,7 +369,7 @@ extern "C" {
      * back to the OS.
      */
     int grab() {
-        if (!source_devices.size() ) {
+        if (!registered_devices_hashes.size() ) {
             std::cout << "At least one device has to be registered via register_device()" << std::endl;
             return 1;
         }
@@ -421,10 +383,11 @@ extern "C" {
      * key events to the OS.
      */
     void release() {
+        std::cout << "release called" << std::endl;
         if(listener_thread.joinable()) { CFRunLoopStop(listener_loop); listener_thread.join(); }
+        close_registered_devices();
         keyboard.keys.clear();
         close(fd[0]); close(fd[1]);
-        cleanup_allocated_products();
         exit_sink();
     }
 
@@ -476,13 +439,23 @@ int main() {
                  "device_matches(NULL): " << device_matches(NULL) << std::endl <<
                  "device_matches(appl): " << device_matches("Apple Internal Keyboard / Trackpad") << std::endl <<
                  "device_matches(____): " << device_matches("nano") << std::noboolalpha << std::endl;
-    char* keeb = "Apple Internal Keyboard / Trackpad";
-    register_device(keeb);
-    std::cout << "registered device: " << keeb << std::endl;
+
+    const char* keeb = "Apple Internal Keyboard / Trackpad";
+    const char* othr = "DZ60RGB_ANSI";
+
+
+    // register_device(keeb);
+    // register_device(nullptr);
+    register_device(othr);
+
+    for ( uint64_t hash : registered_devices_hashes )
+        std::cout << "registered device: " << CFStringToStdString( get_device_name( get_device_by_hash(hash) ) ) <<
+                  std::hex << " hash: " << hash << std::dec << " dev: " << get_device_by_hash(hash) << std::endl;
+
     grab();
-    std::cout << "init sink " << std::endl;
     listener_thread.join();
     release();
+
     return 0;
 }
 #endif
