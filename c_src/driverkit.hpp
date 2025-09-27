@@ -53,6 +53,18 @@ struct DKEvent {
     uint32_t code;
 };
 
+/*
+ * Device data
+ * product_key: device name IOKit (kIOHIDProductKey)
+ * vendor_id:   IOKit (kIOHIDVendorIDKey)
+ * product_id:  IOKit (kIOHIDProductIDKey)
+ */
+struct DeviceData {
+    const char* product_key;
+    uint32_t vendor_id;
+    uint32_t product_id;
+};
+
 using callback_type = void(*)(void*, io_iterator_t);
 void subscribe_to_notification(const char* notification_type, void* cb_arg, callback_type callback);
 void device_connected_callback(void* context, io_iterator_t iter);
@@ -145,4 +157,17 @@ extern "C" {
     bool device_matches(const char* product);
     bool driver_activated();
     bool register_device(const char* product_key);
+    bool register_device_hash(uint64_t device_hash) {
+        return consume_devices([device_hash](mach_port_t current_device) {
+            // Don't open karabiner
+            if( isSubstring(from_cstr("Karabiner"), get_property(current_device, kIOHIDProductKey) ) )
+                return false;
+            if ( hash_device(current_device) == device_hash ) {
+                registered_devices_hashes.insert(device_hash);
+                return true;
+            }
+            return false;
+        });
+    }
+    const DeviceData* get_device_list(size_t* array_length);
 }

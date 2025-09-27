@@ -270,12 +270,23 @@ IOHIDDeviceRef get_device_by_hash(uint64_t device_hash) {
     return nullptr;
 }
 
+uint64_t fnv_hash(const std::string& key) {
+    const uint64_t FNV_OFFSET = 14695981039346656037ull;
+    const uint64_t FNV_PRIME  = 1099511628211ull;
+    uint64_t hash = FNV_OFFSET;
+    for (unsigned char c : key) {
+        hash ^= c;
+        hash *= FNV_PRIME;
+    }
+    return hash;
+}
+
 uint64_t hash_device(mach_port_t device) {
     std::string product_key = CFStringToStdString(get_property(device, kIOHIDProductKey));
     uint32_t vendor_id      = get_number_property(device, kIOHIDVendorIDKey);
     uint32_t product_id     = get_number_property(device, kIOHIDProductIDKey);
     std::string key         = std::to_string(vendor_id) + ":" + std::to_string(product_id) + ":" + product_key;
-    return std::hash<std::string> {}(key);
+    return fnv_hash(key);
 }
 
 extern "C" {
@@ -312,10 +323,11 @@ extern "C" {
         consume_devices([](mach_port_t current_device) {
             // TODO: filter out duplicates (same vendor_id, product_id, name)
             // Also, print as decimal instad of hex?
-            std::printf("vendor id: 0x%04X\t product id: 0x%04X\t Product key (name): %s\n",
+            std::printf("vendor id: 0x%04X\t product id: 0x%04X\t Product key (name): %s hash: %llu\n",
                         get_number_property(current_device, kIOHIDVendorIDKey),
                         get_number_property(current_device, kIOHIDProductIDKey),
-                        CFStringToStdString(get_property(current_device, kIOHIDProductKey)).c_str());
+                        CFStringToStdString(get_property(current_device, kIOHIDProductKey)).c_str(),
+                        hash_device(current_device));
             return true;
         });
     }
@@ -426,6 +438,23 @@ extern "C" {
         else return 1;
         #endif
     }
+
+    const DeviceData* get_device_list(size_t* array_length) {
+        static std::vector<std::string> products;   // to own the strings
+        static std::vector<DeviceData>  devices;
+        products.clear(); devices.clear();
+        consume_devices([](mach_port_t current_device) {
+                DeviceData d;
+                products.emplace_back(CFStringToStdString(get_property(current_device, kIOHIDProductKey)));
+                d.vendor_id   = get_number_property(current_device, kIOHIDVendorIDKey);
+                d.product_id  = get_number_property(current_device, kIOHIDProductIDKey);
+                devices.push_back({ products.back().c_str(), d.vendor_id, d.product_id });
+            return true;
+        });
+        *array_length = devices.size();
+        return devices.data();
+    }
+
 }
 
 // main function is just for testing
