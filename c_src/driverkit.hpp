@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <atomic>
 #include <thread>
 #include <iostream>
 #include <mach/mach_error.h>
@@ -26,6 +27,9 @@
     #include "virtual_hid_device_driver.hpp"
     #include "virtual_hid_device_service.hpp"
     pqrs::karabiner::driverkit::virtual_hid_device_service::client* client;
+    // Tracks whether the DriverKit virtual keyboard is ready for output.
+    // Written by pqrs dispatcher callbacks, read by the event loop thread.
+    std::atomic<bool> sink_ready{false};
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::keyboard_input keyboard;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_top_case_input top_case;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_keyboard_input apple_keyboard;
@@ -170,4 +174,8 @@ extern "C" {
         });
     }
     const DeviceData* get_device_list(size_t* array_length);
+
+    bool is_sink_ready();
+    void release_input_only();
+    bool regrab_input();
 }

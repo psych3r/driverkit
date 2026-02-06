@@ -19,6 +19,9 @@ mod interface {
         pub fn register_device(product: *mut c_char) -> bool;
         pub fn register_device_hash(hash: u64) -> bool;
         pub fn get_device_list(array_length: *mut usize) -> *const DeviceData;
+        pub fn is_sink_ready() -> bool;
+        pub fn release_input_only();
+        pub fn regrab_input() -> bool;
     }
 
     #[repr(C)]
@@ -92,7 +95,12 @@ fn fnv1a_64(data: &str) -> u64 {
     hash
 }
 
-/// Sends a keyevent to the OS via the Karabiner-VirtualHIDDevice driver
+/// Sends a keyevent to the OS via the Karabiner-VirtualHIDDevice driver.
+///
+/// Returns:
+/// - `0`: success
+/// - `1`: unrecognized usage page
+/// - `2`: sink not ready (DriverKit virtual keyboard disconnected)
 pub fn send_key(e: *mut interface::DKEvent) -> i32 {
     unsafe { interface::send_key(e) }
 }
@@ -220,7 +228,7 @@ pub fn device_matches(product: &str) -> bool {
     if product.is_empty() {
         // will match all devices in this case
         true
-    } 
+    }
     else if let Some(hash) = parse_register_request(product) {
         let devices = fetch_devices();
         devices.iter().any(|d| d.hash == hash)
@@ -234,4 +242,22 @@ pub fn device_matches(product: &str) -> bool {
         }
         ret
     }
+}
+
+/// Returns true when the DriverKit virtual keyboard is ready for output.
+/// On the kext path, always returns true.
+pub fn is_sink_ready() -> bool {
+    unsafe { interface::is_sink_ready() }
+}
+
+/// Releases seized input devices and closes the pipe, but keeps the output
+/// (sink) connection alive. After this call, wait_key() will return 0 (EOF).
+pub fn release_input_only() {
+    unsafe { interface::release_input_only() }
+}
+
+/// Re-seizes input devices using the same device hashes from prior
+/// register_device() calls. Returns true if at least one device was seized.
+pub fn regrab_input() -> bool {
+    unsafe { interface::regrab_input() }
 }
