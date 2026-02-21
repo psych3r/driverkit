@@ -33,4 +33,5 @@ fn main() {
     println!("cargo:rerun-if-changed=c_src/c_src/driverkit.cpp");
     println!("cargo:rustc-link-lib=framework=IOKit");
     println!("cargo:rustc-link-lib=framework=CoreFoundation");
+    println!("cargo:rustc-link-lib=framework=CoreGraphics");
 }
