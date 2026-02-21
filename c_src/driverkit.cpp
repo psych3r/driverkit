@@ -104,11 +104,25 @@ int init_sink() {
             copy->async_virtual_hid_keyboard_initialize(parameters);
         });
 
-        client->closed.connect([] { std::cout << "closed" << std::endl; });
+        client->virtual_hid_keyboard_ready.connect([](auto&& ready) {
+            std::cout << "virtual_hid_keyboard_ready " << ready << std::endl;
+            sink_ready.store(ready, std::memory_order_release);
+        });
 
-        client->connect_failed.connect([](auto&& error_code) { std::cout << "connect_failed " << error_code << std::endl; });
+        client->closed.connect([] {
+            std::cout << "closed" << std::endl;
+            sink_ready.store(false, std::memory_order_release);
+        });
 
-        client->error_occurred.connect([](auto&& error_code) { std::cout << "error_occurred " << error_code << std::endl; });
+        client->connect_failed.connect([](auto&& error_code) {
+            std::cout << "connect_failed " << error_code << std::endl;
+            sink_ready.store(false, std::memory_order_release);
+        });
+
+        client->error_occurred.connect([](auto&& error_code) {
+            std::cout << "error_occurred " << error_code << std::endl;
+            sink_ready.store(false, std::memory_order_release);
+        });
 
         client->driver_activated.connect([](auto&& driver_activated) {
             static std::optional<bool> previous_value;
@@ -386,8 +400,12 @@ extern "C" {
             return 1;
         }
         if (pipe(fd) == -1) { std::cerr << "pipe error: " << errno << std::endl; return errno; }
+        // Connect output before seizing input — ensures we can emit keystrokes
+        // before taking exclusive control of the keyboard.
+        int sink_err = init_sink();
+        if (sink_err) return sink_err;
         fire_listener_thread();
-        return init_sink();
+        return 0;
     }
 
     /*
@@ -424,6 +442,7 @@ extern "C" {
         else
             return 1;
         #else
+        if(!sink_ready.load(std::memory_order_acquire)) return 2;
         auto usage_page = pqrs::hid::usage_page::value_t(e->page);
         if(usage_page == pqrs::hid::usage_page::keyboard_or_keypad)
             return send_key(keyboard, e);
@@ -453,6 +472,56 @@ extern "C" {
         });
         *array_length = devices.size();
         return devices.data();
+    }
+
+    /*
+     * Returns true when the DriverKit virtual keyboard is ready for output.
+     * On the kext path, always returns true (kext has no async connection).
+     */
+    bool is_sink_ready() {
+        #ifdef USE_KEXT
+        return true;
+        #else
+        return sink_ready.load(std::memory_order_acquire);
+        #endif
+    }
+
+    /*
+     * Releases seized input devices and closes the pipe, but keeps the
+     * output (sink) connection alive. This allows the pqrs client to
+     * continue its heartbeat and auto-reconnect while the keyboard
+     * returns to normal (unseized) operation.
+     *
+     * After this call, wait_key() on the read end of the pipe will
+     * return 0 (EOF), which the caller can use to detect the release.
+     */
+    void release_input_only() {
+        #ifndef USE_KEXT
+        if(listener_thread.joinable()) {
+            CFRunLoopRemoveSource(listener_loop, IONotificationPortGetRunLoopSource(notification_port), kCFRunLoopDefaultMode);
+            CFRunLoopStop(listener_loop);
+            listener_thread.join();
+        }
+        close_registered_devices();
+        keyboard.keys.clear();
+        close(fd[0]); close(fd[1]);
+        #endif
+    }
+
+    /*
+     * Re-seizes previously registered input devices after a recovery.
+     * Requires that register_device() was called before (hashes are retained).
+     * Returns true if at least one device was seized.
+     */
+    bool regrab_input() {
+        #ifdef USE_KEXT
+        return true;
+        #else
+        if (!registered_devices_hashes.size()) return false;
+        if (pipe(fd) == -1) { std::cerr << "pipe error: " << errno << std::endl; return false; }
+        fire_listener_thread();
+        return true;
+        #endif
     }
 
 }
