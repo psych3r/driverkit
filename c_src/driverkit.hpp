@@ -8,6 +8,7 @@
 #include <IOKit/hid/IOHIDLib.h>
 #include <IOKit/hidsystem/IOHIDShared.h>
 #include <set>
+#include <unordered_map>
 
 /* The name was changed from "Master" to "Main" in Apple SDK 12.0 (Monterey) */
 #if (MAC_OS_X_VERSION_MIN_REQUIRED < 120000) // Before macOS 12 Monterey
@@ -41,6 +42,10 @@ IONotificationPortRef notification_port = IONotificationPortCreate(kIOMainPortDe
 std::thread listener_thread;
 CFRunLoopRef listener_loop;
 std::set<uint64_t> registered_devices_hashes;
+// Maps device hash → the IOHIDDeviceRef that was opened with kIOHIDOptionsTypeSeizeDevice.
+// close_registered_devices() must close the SAME ref that capture_device() opened;
+// creating a new ref via IOHIDDeviceCreate() and closing that does NOT release the seizure.
+std::unordered_map<uint64_t, IOHIDDeviceRef> opened_device_refs;
 
 int fd[2];
 CFMutableDictionaryRef matching_dictionary = NULL;
@@ -80,7 +85,7 @@ void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef 
 template <typename Func>
 bool consume_devices(Func consume);
 bool capture_registered_devices();
-bool capture_device(IOHIDDeviceRef device_ref);
+bool capture_device(IOHIDDeviceRef device_ref, uint64_t device_hash);
 
 int  init_sink();
 int  exit_sink();

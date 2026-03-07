@@ -191,18 +191,18 @@ void device_connected_callback(void* context, io_iterator_t iter) {
     for (mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {
         uint64_t curr_hash = hash_device(curr);
         if ( curr_hash == device_hash )
-            capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, curr));
+            capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, curr), curr_hash);
         IOObjectRelease(curr);
     }
 }
 
 void close_registered_devices() {
-    for(auto hash : registered_devices_hashes) {
-        IOHIDDeviceRef device_ref = get_device_by_hash(hash);
+    for(auto& [hash, device_ref] : opened_device_refs) {
         kern_return_t kr = IOHIDDeviceClose(device_ref, kIOHIDOptionsTypeSeizeDevice);
-        if(kr != KERN_SUCCESS) { print_iokit_error("IOHIDDeviceClose", kr); return; }
+        if(kr != KERN_SUCCESS) { print_iokit_error("IOHIDDeviceClose", kr); }
         CFRelease(device_ref);
     }
+    opened_device_refs.clear();
 }
 
 void init_keyboards_dictionary() {
@@ -246,14 +246,16 @@ void subscribe_to_notification(const char* notification_type, void* cb_arg, call
         IOObjectRelease(obj);
 }
 
-bool capture_device(IOHIDDeviceRef device_ref) {
+bool capture_device(IOHIDDeviceRef device_ref, uint64_t device_hash) {
     kern_return_t kr = IOHIDDeviceOpen(device_ref, kIOHIDOptionsTypeSeizeDevice);
     if(kr != kIOReturnSuccess) {
         print_iokit_error("IOHIDDeviceOpen", kr, CFStringToStdString(get_device_name(device_ref)));
+        CFRelease(device_ref);
         return false;
     }
     IOHIDDeviceRegisterInputValueCallback(device_ref, input_callback, NULL);
     IOHIDDeviceScheduleWithRunLoop(device_ref, listener_loop, kCFRunLoopDefaultMode);
+    opened_device_refs[device_hash] = device_ref;
     return true;
 }
 
@@ -263,7 +265,7 @@ bool capture_registered_devices() {
     return consume_devices([](mach_port_t c) {
         uint64_t device_hash = hash_device(c);
         if ( registered_devices_hashes.find(device_hash) != registered_devices_hashes.end() ) {
-            bool captured = capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, c));
+            bool captured = capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, c), device_hash);
             if ( captured ) {
                 void* dev_hash = reinterpret_cast<void*>(static_cast<uintptr_t>(device_hash));
                 subscribe_to_notification(kIOMatchedNotification, dev_hash, device_connected_callback);
