@@ -183,6 +183,7 @@ void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef 
     e.value = IOHIDValueGetIntegerValue(value);
     e.page = IOHIDElementGetUsagePage(element);
     e.code = IOHIDElementGetUsage(element);
+    e.device_hash = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(context));
     write(fd[1], &e, sizeof(struct DKEvent));
 }
 
@@ -253,7 +254,8 @@ bool capture_device(IOHIDDeviceRef device_ref, uint64_t device_hash) {
         CFRelease(device_ref);
         return false;
     }
-    IOHIDDeviceRegisterInputValueCallback(device_ref, input_callback, NULL);
+    void* ctx = reinterpret_cast<void*>(static_cast<uintptr_t>(device_hash));
+    IOHIDDeviceRegisterInputValueCallback(device_ref, input_callback, ctx);
     IOHIDDeviceScheduleWithRunLoop(device_ref, listener_loop, kCFRunLoopDefaultMode);
     opened_device_refs[device_hash] = device_ref;
     return true;

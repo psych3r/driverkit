@@ -55,11 +55,13 @@ CFMutableDictionaryRef matching_dictionary = NULL;
  * value: represents key up or key down
  * page: represents IOKit usage page
  * code: represents IOKit usage
+ * device_hash: FNV-1a hash identifying which physical device sent the event
  */
 struct DKEvent {
     uint64_t value;
     uint32_t page;
     uint32_t code;
+    uint64_t device_hash;
 };
 
 /*
