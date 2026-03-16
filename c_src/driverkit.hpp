@@ -155,6 +155,39 @@ inline std::string CFStringToStdString(CFStringRef cfString) {
     return std::string();
 }
 
+// Returns the product name for a device, trying kIOHIDProductKey first,
+// then falling back to the IORegistry "Product" property.
+// BLE HID devices may not populate kIOHIDProductKey at enumeration time,
+// but the "Product" registry entry (from the USB/BLE descriptor) is
+// often available.
+inline std::string get_product_name(mach_port_t device) {
+    CFStringRef hid_key = get_property(device, kIOHIDProductKey);
+    std::string name = CFStringToStdString(hid_key);
+    if (hid_key) CFRelease(hid_key);
+    if (name.empty()) {
+        CFStringRef product_ref = (CFStringRef)IORegistryEntryCreateCFProperty(
+            device, CFSTR("Product"), kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+        if (product_ref) {
+            name = CFStringToStdString(product_ref);
+            CFRelease(product_ref);
+        }
+    }
+    return name;
+}
+
+// Returns the product name as a CFStringRef, trying kIOHIDProductKey first,
+// then falling back to the IORegistry "Product" property.
+// Caller is responsible for releasing the returned CFStringRef.
+inline CFStringRef get_product_name_cf(mach_port_t device) {
+    CFStringRef name = get_property(device, kIOHIDProductKey);
+    if (!name || CFStringGetLength(name) == 0) {
+        if (name) CFRelease(name);
+        name = (CFStringRef)IORegistryEntryCreateCFProperty(
+            device, CFSTR("Product"), kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+    }
+    return name;
+}
+
 extern "C" {
     int grab();
     int send_key(struct DKEvent* e);
@@ -169,8 +202,12 @@ extern "C" {
     bool register_device_hash(uint64_t device_hash) {
         return consume_devices([device_hash](mach_port_t current_device) {
             // Don't open karabiner
-            if( isSubstring(from_cstr("Karabiner"), get_property(current_device, kIOHIDProductKey) ) )
+            CFStringRef name = get_product_name_cf(current_device);
+            if( isSubstring(from_cstr("Karabiner"), name) ) {
+                if (name) CFRelease(name);
                 return false;
+            }
+            if (name) CFRelease(name);
             if ( hash_device(current_device) == device_hash ) {
                 registered_devices_hashes.insert(device_hash);
                 return true;

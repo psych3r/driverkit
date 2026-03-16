@@ -298,7 +298,7 @@ uint64_t fnv_hash(const std::string& key) {
 }
 
 uint64_t hash_device(mach_port_t device) {
-    std::string product_key = CFStringToStdString(get_property(device, kIOHIDProductKey));
+    std::string product_key = get_product_name(device);
     uint32_t vendor_id      = get_number_property(device, kIOHIDVendorIDKey);
     uint32_t product_id     = get_number_property(device, kIOHIDProductIDKey);
     std::string key         = std::to_string(vendor_id) + ":" + std::to_string(product_id) + ":" + product_key;
@@ -315,7 +315,7 @@ extern "C" {
         return consume_devices([product_key](mach_port_t current_device) {
             CFStringRef product_key_cfstring = product_key ? from_cstr(product_key) : from_cstr("");
             CFStringRef karabiner            = from_cstr("Karabiner"); //Karabiner DriverKit VirtualHIDKeyboard 1.7.0
-            CFStringRef current_product_key  = get_property(current_device, kIOHIDProductKey);
+            CFStringRef current_product_key  = get_product_name_cf(current_device);
             // Don't open karabiner devices or devices without a name
             if(!current_product_key || isSubstring(karabiner, current_product_key) ) {
                 release_strings(karabiner, current_product_key, product_key_cfstring);
@@ -332,7 +332,7 @@ extern "C" {
     }
 
     void list_keyboards() { // CFStringGetCStringPtr(cfString, kCFStringEncodingUTF8)
-        consume_devices([](mach_port_t c) { std::cout << CFStringToStdString( get_property(c, kIOHIDProductKey) ) << std::endl; return true;});
+        consume_devices([](mach_port_t c) { std::cout << get_product_name(c) << std::endl; return true;});
     }
 
     void list_keyboards_with_ids() {
@@ -342,7 +342,7 @@ extern "C" {
             std::printf("vendor id: 0x%04X\t product id: 0x%04X\t Product key (name): %s hash: %llu\n",
                         get_number_property(current_device, kIOHIDVendorIDKey),
                         get_number_property(current_device, kIOHIDProductIDKey),
-                        CFStringToStdString(get_property(current_device, kIOHIDProductKey)).c_str(),
+                        get_product_name(current_device).c_str(),
                         hash_device(current_device));
             return true;
         });
@@ -372,9 +372,9 @@ extern "C" {
         io_iterator_t iter = get_keyboards_iterator();
         CFStringRef device = from_cstr(product);
         for(mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {
-            CFStringRef current_device = get_property(curr, kIOHIDProductKey);
+            CFStringRef current_device = get_product_name_cf(curr);
             if( current_device == NULL || CFStringCompare(current_device, device, 0) != kCFCompareEqualTo ) {
-                CFRelease(current_device);
+                if (current_device) CFRelease(current_device);
                 continue;
             } else {
                 release_strings(device, current_device);
@@ -466,7 +466,7 @@ extern "C" {
         products.clear(); devices.clear();
         consume_devices([](mach_port_t current_device) {
                 DeviceData d;
-                products.emplace_back(CFStringToStdString(get_property(current_device, kIOHIDProductKey)));
+                products.emplace_back(get_product_name(current_device));
                 d.vendor_id   = get_number_property(current_device, kIOHIDVendorIDKey);
                 d.product_id  = get_number_property(current_device, kIOHIDProductIDKey);
                 devices.push_back({ products.back().c_str(), d.vendor_id, d.product_id });
