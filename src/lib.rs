@@ -30,6 +30,7 @@ mod interface {
         pub value: u64,
         pub page: u32,
         pub code: u32,
+        pub device_hash: u64,
     }
 
     #[repr(C)]
