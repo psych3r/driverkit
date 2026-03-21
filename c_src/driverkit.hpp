@@ -202,19 +202,20 @@ extern "C" {
     bool driver_activated();
     bool register_device(const char* product_key);
     bool register_device_hash(uint64_t device_hash) {
+        // Always register the hash so that the device will be captured when
+        // it appears, even if it is not currently connected.
+        registered_devices_hashes.insert(device_hash);
+
+        // Check if the device is currently connected (for the return value).
         return consume_devices([device_hash](mach_port_t current_device) {
-            // Don't open karabiner
+            // Don't match karabiner devices
             CFStringRef name = get_product_name_cf(current_device);
             if( isSubstring(from_cstr("Karabiner"), name) ) {
                 if (name) CFRelease(name);
                 return false;
             }
             if (name) CFRelease(name);
-            if ( hash_device(current_device) == device_hash ) {
-                registered_devices_hashes.insert(device_hash);
-                return true;
-            }
-            return false;
+            return hash_device(current_device) == device_hash;
         });
     }
     const DeviceData* get_device_list(size_t* array_length);
