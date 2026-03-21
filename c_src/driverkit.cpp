@@ -264,17 +264,24 @@ bool capture_device(IOHIDDeviceRef device_ref, uint64_t device_hash) {
 bool capture_registered_devices() {
     // Register the notification port to the run loop, essential for receiving re-connect events so we can re-capture devices
     CFRunLoopAddSource(listener_loop, IONotificationPortGetRunLoopSource(notification_port), kCFRunLoopDefaultMode);
-    return consume_devices([](mach_port_t c) {
+
+    // Try to capture devices that are already connected
+    bool any_captured = consume_devices([](mach_port_t c) {
         uint64_t device_hash = hash_device(c);
         if ( registered_devices_hashes.find(device_hash) != registered_devices_hashes.end() ) {
-            bool captured = capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, c), device_hash);
-            if ( captured ) {
-                void* dev_hash = reinterpret_cast<void*>(static_cast<uintptr_t>(device_hash));
-                subscribe_to_notification(kIOMatchedNotification, dev_hash, device_connected_callback);
-            }
-            return captured;
+            return capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, c), device_hash);
         } else return false;
     });
+
+    // Subscribe to notifications for ALL registered devices, regardless of
+    // whether they are currently connected. This ensures that devices which
+    // appear later (e.g. plugged in after startup) are automatically captured.
+    for (auto hash : registered_devices_hashes) {
+        void* dev_hash = reinterpret_cast<void*>(static_cast<uintptr_t>(hash));
+        subscribe_to_notification(kIOMatchedNotification, dev_hash, device_connected_callback);
+    }
+
+    return any_captured;
 }
 
 IOHIDDeviceRef get_device_by_hash(uint64_t device_hash) {
