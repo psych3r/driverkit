@@ -102,6 +102,7 @@ int init_sink() {
             pqrs::karabiner::driverkit::virtual_hid_device_service::virtual_hid_keyboard_parameters parameters;
             parameters.set_country_code(pqrs::hid::country_code::us);
             copy->async_virtual_hid_keyboard_initialize(parameters);
+            copy->async_virtual_hid_pointing_initialize();
         });
 
         client->virtual_hid_keyboard_ready.connect([](auto&& ready) {
@@ -109,19 +110,27 @@ int init_sink() {
             sink_ready.store(ready, std::memory_order_release);
         });
 
+        client->virtual_hid_pointing_ready.connect([](auto&& ready) {
+            std::cout << "virtual_hid_pointing_ready " << ready << std::endl;
+            pointing_sink_ready.store(ready, std::memory_order_release);
+        });
+
         client->closed.connect([] {
             std::cout << "closed" << std::endl;
             sink_ready.store(false, std::memory_order_release);
+            pointing_sink_ready.store(false, std::memory_order_release);
         });
 
         client->connect_failed.connect([](auto&& error_code) {
             std::cout << "connect_failed " << error_code << std::endl;
             sink_ready.store(false, std::memory_order_release);
+            pointing_sink_ready.store(false, std::memory_order_release);
         });
 
         client->error_occurred.connect([](auto&& error_code) {
             std::cout << "error_occurred " << error_code << std::endl;
             sink_ready.store(false, std::memory_order_release);
+            pointing_sink_ready.store(false, std::memory_order_release);
         });
 
         client->driver_activated.connect([](auto&& driver_activated) {
@@ -528,6 +537,49 @@ extern "C" {
         if (pipe(fd) == -1) { std::cerr << "pipe error: " << errno << std::endl; return false; }
         fire_listener_thread();
         return true;
+        #endif
+    }
+
+    // Virtual HID pointing device functions (DriverKit/dext only)
+    // Buttons are 1-indexed: 1 = primary, 2 = secondary, 3 = middle, etc.
+    void pointing_button_press(uint8_t button) {
+        #ifndef USE_KEXT
+        if (!pointing_sink_ready.load(std::memory_order_acquire)) return;
+        pointing.buttons.insert(button);
+        client->async_post_report(pointing);
+        #endif
+    }
+
+    void pointing_button_release(uint8_t button) {
+        #ifndef USE_KEXT
+        if (!pointing_sink_ready.load(std::memory_order_acquire)) return;
+        pointing.buttons.erase(button);
+        client->async_post_report(pointing);
+        #endif
+    }
+
+    void pointing_post_motion(int8_t x, int8_t y, int8_t vertical_wheel, int8_t horizontal_wheel) {
+        #ifndef USE_KEXT
+        if (!pointing_sink_ready.load(std::memory_order_acquire)) return;
+        pointing.x = static_cast<uint8_t>(x);
+        pointing.y = static_cast<uint8_t>(y);
+        pointing.vertical_wheel = static_cast<uint8_t>(vertical_wheel);
+        pointing.horizontal_wheel = static_cast<uint8_t>(horizontal_wheel);
+        client->async_post_report(pointing);
+        // Reset motion fields after posting, matching Karabiner-Elements behavior:
+        // each motion report is a delta, not an absolute position.
+        pointing.x = 0;
+        pointing.y = 0;
+        pointing.vertical_wheel = 0;
+        pointing.horizontal_wheel = 0;
+        #endif
+    }
+
+    bool is_pointing_ready() {
+        #ifdef USE_KEXT
+        return true;
+        #else
+        return pointing_sink_ready.load(std::memory_order_acquire);
         #endif
     }
 

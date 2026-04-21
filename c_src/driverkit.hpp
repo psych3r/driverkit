@@ -31,11 +31,14 @@
     // Tracks whether the DriverKit virtual keyboard is ready for output.
     // Written by pqrs dispatcher callbacks, read by the event loop thread.
     std::atomic<bool> sink_ready{false};
+    // Tracks whether the DriverKit virtual pointing device is ready for output.
+    std::atomic<bool> pointing_sink_ready{false};
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::keyboard_input keyboard;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_top_case_input top_case;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::apple_vendor_keyboard_input apple_keyboard;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::consumer_input consumer;
     pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::generic_desktop_input generic_desktop;
+    pqrs::karabiner::driverkit::virtual_hid_device_driver::hid_report::pointing_input pointing;
 #endif
 
 IONotificationPortRef notification_port = IONotificationPortCreate(kIOMainPortDefault);
@@ -222,4 +225,10 @@ extern "C" {
     bool is_sink_ready();
     void release_input_only();
     bool regrab_input();
+
+    // Virtual HID pointing device functions (DriverKit/dext only)
+    void pointing_button_press(uint8_t button);
+    void pointing_button_release(uint8_t button);
+    void pointing_post_motion(int8_t x, int8_t y, int8_t vertical_wheel, int8_t horizontal_wheel);
+    bool is_pointing_ready();
 }

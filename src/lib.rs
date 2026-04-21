@@ -22,6 +22,12 @@ mod interface {
         pub fn is_sink_ready() -> bool;
         pub fn release_input_only();
         pub fn regrab_input() -> bool;
+
+        // Virtual HID pointing device functions
+        pub fn pointing_button_press(button: u8);
+        pub fn pointing_button_release(button: u8);
+        pub fn pointing_post_motion(x: i8, y: i8, vertical_wheel: i8, horizontal_wheel: i8);
+        pub fn is_pointing_ready() -> bool;
     }
 
     #[repr(C)]
@@ -261,4 +267,34 @@ pub fn release_input_only() {
 /// register_device() calls. Returns true if at least one device was seized.
 pub fn regrab_input() -> bool {
     unsafe { interface::regrab_input() }
+}
+
+// ------------------------------------------------------------------
+// Virtual HID pointing device wrappers
+// ------------------------------------------------------------------
+
+/// Press a pointing device button (1 = primary, 2 = secondary, 3 = middle, ...).
+/// Silently ignored if the virtual pointing device is not ready.
+pub fn pointing_button_press(button: u8) {
+    unsafe { interface::pointing_button_press(button) }
+}
+
+/// Release a pointing device button.
+/// Silently ignored if the virtual pointing device is not ready.
+pub fn pointing_button_release(button: u8) {
+    unsafe { interface::pointing_button_release(button) }
+}
+
+/// Post a pointing motion report with the given deltas.
+/// `x` and `y` are signed cursor deltas; `vertical_wheel` and `horizontal_wheel`
+/// are signed scroll deltas. All values are in two's-complement uint8_t range
+/// (-127 to 127). Silently ignored if the virtual pointing device is not ready.
+pub fn pointing_post_motion(x: i8, y: i8, vertical_wheel: i8, horizontal_wheel: i8) {
+    unsafe { interface::pointing_post_motion(x, y, vertical_wheel, horizontal_wheel) }
+}
+
+/// Returns true when the DriverKit virtual pointing device is ready for output.
+/// On the kext path, always returns true.
+pub fn is_pointing_ready() -> bool {
+    unsafe { interface::is_pointing_ready() }
 }
