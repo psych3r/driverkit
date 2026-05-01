@@ -18,6 +18,7 @@ mod interface {
         pub fn device_matches(product: *mut c_char) -> bool;
         pub fn register_device(product: *mut c_char) -> bool;
         pub fn register_device_hash(hash: u64) -> bool;
+        pub fn register_device_vidpid(vendor_id: u32, product_id: u32) -> bool;
         pub fn get_device_list(array_length: *mut usize) -> *const DeviceData;
         pub fn is_sink_ready() -> bool;
         pub fn release_input_only();
@@ -178,6 +179,16 @@ pub fn register_device(input: &str) -> bool {
         // println!("Registering device with product key: {}", input);
         register_device_str(input)
     }
+}
+
+/// Registers a device by vendor and product ID for capture.
+/// The VID:PID is always registered (even if the device is not currently
+/// connected), and the return value indicates whether a matching device
+/// is currently present. This is more reliable than name-based
+/// registration for devices whose product name changes across connect
+/// cycles (common with QMK/Via firmware).
+pub fn register_device_vidpid(vendor_id: u32, product_id: u32) -> bool {
+    unsafe { interface::register_device_vidpid(vendor_id, product_id) }
 }
 
 /// Grabs control of registered devices and starts the monitoring loop

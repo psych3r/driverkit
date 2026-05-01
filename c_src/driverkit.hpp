@@ -42,6 +42,7 @@ IONotificationPortRef notification_port = IONotificationPortCreate(kIOMainPortDe
 std::thread listener_thread;
 CFRunLoopRef listener_loop;
 std::set<uint64_t> registered_devices_hashes;
+std::set<uint64_t> registered_device_vidpids;
 // Maps device hash → the IOHIDDeviceRef that was opened with kIOHIDOptionsTypeSeizeDevice.
 // close_registered_devices() must close the SAME ref that capture_device() opened;
 // creating a new ref via IOHIDDeviceCreate() and closing that does NOT release the seizure.
@@ -79,6 +80,7 @@ struct DeviceData {
 using callback_type = void(*)(void*, io_iterator_t);
 void subscribe_to_notification(const char* notification_type, void* cb_arg, callback_type callback);
 void device_connected_callback(void* context, io_iterator_t iter);
+void device_connected_vidpid_callback(void* context, io_iterator_t iter);
 void fire_listener_thread();
 void init_keyboards_dictionary();
 void close_registered_devices();
@@ -201,6 +203,7 @@ extern "C" {
     bool device_matches(const char* product);
     bool driver_activated();
     bool register_device(const char* product_key);
+    bool register_device_vidpid(uint32_t vendor_id, uint32_t product_id);
     bool register_device_hash(uint64_t device_hash) {
         // Always register the hash so that the device will be captured when
         // it appears, even if it is not currently connected.

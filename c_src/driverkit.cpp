@@ -197,6 +197,27 @@ void device_connected_callback(void* context, io_iterator_t iter) {
     }
 }
 
+void device_connected_vidpid_callback(void* context, io_iterator_t iter) {
+    uint64_t vidpid = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(context));
+    uint32_t vid = static_cast<uint32_t>(vidpid >> 32);
+    uint32_t pid = static_cast<uint32_t>(vidpid & 0xFFFFFFFF);
+    CFStringRef karabiner = from_cstr("Karabiner");
+    for (mach_port_t curr = IOIteratorNext(iter); curr; curr = IOIteratorNext(iter)) {
+        uint32_t curr_vid = get_number_property(curr, kIOHIDVendorIDKey);
+        uint32_t curr_pid = get_number_property(curr, kIOHIDProductIDKey);
+        if (curr_vid == vid && curr_pid == pid) {
+            CFStringRef name = get_product_name_cf(curr);
+            if (name && !isSubstring(karabiner, name)) {
+                uint64_t curr_hash = hash_device(curr);
+                capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, curr), curr_hash);
+            }
+            if (name) CFRelease(name);
+        }
+        IOObjectRelease(curr);
+    }
+    CFRelease(karabiner);
+}
+
 void close_registered_devices() {
     for(auto& [hash, device_ref] : opened_device_refs) {
         kern_return_t kr = IOHIDDeviceClose(device_ref, kIOHIDOptionsTypeSeizeDevice);
@@ -267,15 +288,34 @@ bool capture_registered_devices() {
     // Try to capture devices that are already connected
     bool any_captured = consume_devices([](mach_port_t c) {
         uint64_t device_hash = hash_device(c);
+        // Match by hash
         if ( registered_devices_hashes.find(device_hash) != registered_devices_hashes.end() ) {
             return capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, c), device_hash);
-        } else return false;
+        }
+        // Match by VID:PID
+        uint32_t vid = get_number_property(c, kIOHIDVendorIDKey);
+        uint32_t pid = get_number_property(c, kIOHIDProductIDKey);
+        uint64_t vidpid = (static_cast<uint64_t>(vid) << 32) | pid;
+        if ( registered_device_vidpids.find(vidpid) != registered_device_vidpids.end() ) {
+            CFStringRef name = get_product_name_cf(c);
+            CFStringRef karabiner = from_cstr("Karabiner");
+            bool is_karabiner = name && isSubstring(karabiner, name);
+            release_strings(karabiner, name);
+            if (!is_karabiner) {
+                return capture_device(IOHIDDeviceCreate(kCFAllocatorDefault, c), device_hash);
+            }
+        }
+        return false;
     });
     // Subscribe to notifications for ALL registered devices, regardless of whether they are currently connected.
     // This ensures that devices which appear later (e.g. plugged in after startup) are automatically captured.
     for (auto hash : registered_devices_hashes) {
         void* dev_hash = reinterpret_cast<void*>(static_cast<uintptr_t>(hash));
         subscribe_to_notification(kIOMatchedNotification, dev_hash, device_connected_callback);
+    }
+    for (auto vidpid : registered_device_vidpids) {
+        void* ctx = reinterpret_cast<void*>(static_cast<uintptr_t>(vidpid));
+        subscribe_to_notification(kIOMatchedNotification, ctx, device_connected_vidpid_callback);
     }
     return any_captured;
 }
@@ -401,8 +441,24 @@ extern "C" {
      * Loads a the karabiner kernel extension that will send key events
      * back to the OS.
      */
+    bool register_device_vidpid(uint32_t vendor_id, uint32_t product_id) {
+        uint64_t vidpid = (static_cast<uint64_t>(vendor_id) << 32) | product_id;
+        registered_device_vidpids.insert(vidpid);
+        return consume_devices([vendor_id, product_id](mach_port_t current_device) {
+            CFStringRef name = get_product_name_cf(current_device);
+            CFStringRef karabiner = from_cstr("Karabiner");
+            if (name && isSubstring(karabiner, name)) {
+                release_strings(karabiner, name);
+                return false;
+            }
+            release_strings(karabiner, name);
+            return get_number_property(current_device, kIOHIDVendorIDKey) == vendor_id
+                && get_number_property(current_device, kIOHIDProductIDKey) == product_id;
+        });
+    }
+
     int grab() {
-        if (!registered_devices_hashes.size() ) {
+        if (!registered_devices_hashes.size() && !registered_device_vidpids.size()) {
             std::cout << "At least one device has to be registered via register_device()" << std::endl;
             return 1;
         }
@@ -524,7 +580,7 @@ extern "C" {
         #ifdef USE_KEXT
         return true;
         #else
-        if (!registered_devices_hashes.size()) return false;
+        if (!registered_devices_hashes.size() && !registered_device_vidpids.size()) return false;
         if (pipe(fd) == -1) { std::cerr << "pipe error: " << errno << std::endl; return false; }
         fire_listener_thread();
         return true;
