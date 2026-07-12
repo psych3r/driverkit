@@ -27,6 +27,13 @@
 #else
     #include "virtual_hid_device_driver.hpp"
     #include "virtual_hid_device_service.hpp"
+    // VirtualHIDDevice 8 no longer pulls this type in transitively through
+    // virtual_hid_device_service.hpp.
+    #include <pqrs/osx/iokit_types.hpp>
+    static_assert(
+        type_safe::get(pqrs::karabiner::driverkit::client_protocol_version::embedded_client_protocol_version) == 7,
+        "karabiner-driverkit must be audited before changing VirtualHIDDevice protocol versions"
+    );
     pqrs::karabiner::driverkit::virtual_hid_device_service::client* client;
     // Tracks whether the DriverKit virtual keyboard is ready for output.
     // Written by pqrs dispatcher callbacks, read by the event loop thread.

@@ -10,6 +10,7 @@ repository = "https://github.com/Psych3r/driverkit"
 readme = "README.md"
 license = "LGPL-3.0"
 edition = "2021"
+exclude = ["c_src/Karabiner-DriverKit-VirtualHIDDevice/dist/**"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -4,7 +4,9 @@ fn main() {
     build
         .file("c_src/driverkit.cpp")
         .cpp(true)
-        .std("c++2a")
+        // VirtualHIDDevice 8 uses C++23 library APIs such as
+        // std::to_underlying in its Unix-domain stream transport.
+        .std("c++23")
         .flag("-w")
         .shared_flag(true)
         .flag("-fPIC");

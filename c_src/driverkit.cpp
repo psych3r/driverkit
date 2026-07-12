@@ -643,7 +643,7 @@ extern "C" {
 
 // main function is just for testing
 // build as binary command:
-// g++ c_src/driverkit.cpp -DBUILD_AS_BINARY -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/vendor/vendor/include -std=c++2a -framework IOKit -framework CoreFoundation -o driverkit -g -O0
+// g++ c_src/driverkit.cpp -DBUILD_AS_BINARY -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/src/Client/vendor/include -Ic_src/Karabiner-DriverKit-VirtualHIDDevice/vendor/vendor/include -std=c++2b -framework IOKit -framework CoreFoundation -o driverkit -g -O0
 #ifdef BUILD_AS_BINARY
 int main() {
     list_keyboards();
