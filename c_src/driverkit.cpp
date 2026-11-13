@@ -193,7 +193,23 @@ void input_callback(void* context, IOReturn result, void* sender, IOHIDValueRef 
     e.page = IOHIDElementGetUsagePage(element);
     e.code = IOHIDElementGetUsage(element);
     e.device_hash = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(context));
+    e.flags = IOHIDElementIsRelative(element) ? 2 : 0;
+    for (auto parent = element; parent; parent = IOHIDElementGetParent(parent)) {
+        if (IOHIDElementGetUsagePage(parent) == kHIDPage_GenericDesktop &&
+            (IOHIDElementGetUsage(parent) == kHIDUsage_GD_Mouse ||
+             IOHIDElementGetUsage(parent) == kHIDUsage_GD_Pointer)) {
+            e.flags |= 1;
+            break;
+        }
+    }
     write(fd[1], &e, sizeof(struct DKEvent));
+}
+
+void removal_callback(void* context, IOReturn, void*) {
+    DKEvent event{};
+    event.device_hash = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(context));
+    event.flags = 4;
+    write(fd[1], &event, sizeof(event));
 }
 
 void device_connected_callback(void* context, io_iterator_t iter) {
@@ -286,6 +302,7 @@ bool capture_device(IOHIDDeviceRef device_ref, uint64_t device_hash) {
     }
     void* ctx = reinterpret_cast<void*>(static_cast<uintptr_t>(device_hash));
     IOHIDDeviceRegisterInputValueCallback(device_ref, input_callback, ctx);
+    IOHIDDeviceRegisterRemovalCallback(device_ref, removal_callback, ctx);
     IOHIDDeviceScheduleWithRunLoop(device_ref, listener_loop, kCFRunLoopDefaultMode);
     opened_device_refs[device_hash] = device_ref;
     return true;
